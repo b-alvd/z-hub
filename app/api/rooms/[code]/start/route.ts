@@ -11,7 +11,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ co
 
   const roomRow = await db.execute({ sql: "SELECT host_id, status, num_ai FROM game_rooms WHERE code = ?", args: [code] });
   if (!roomRow.rows.length) return NextResponse.json({ error: "Partie introuvable" }, { status: 404 });
-  const [hostId, status, numAI] = roomRow.rows[0];
+  const row0 = roomRow.rows[0];
+  const hostId = row0[0];
+  const status = row0[1];
+  const numAI = row0[2];
   if (hostId !== user.id) return NextResponse.json({ error: "Seul l'hôte peut lancer" }, { status: 403 });
   if (status !== "waiting") return NextResponse.json({ error: "Partie déjà commencée" }, { status: 400 });
 
