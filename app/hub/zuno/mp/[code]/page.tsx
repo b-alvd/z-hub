@@ -82,6 +82,9 @@ export default function ZunoMP() {
   const prevStateRef = useRef<GameState | null>(null);
   const myPlayerIndexRef = useRef(-1);
   const actingRef = useRef(false);
+  const isMyTurnRef = useRef(false);
+  const didDrawLocallyRef = useRef(false); // prevents double draw animation
+  const drawFlyQueueRef = useRef<{ fromX: number; fromY: number; toX: number; toY: number; remaining: number; sendAfter: boolean } | null>(null);
   const pendingPlayFlyRef = useRef<{ x: number; y: number; card: SanitizedCard } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const deckRef = useRef<HTMLDivElement | null>(null);
@@ -99,6 +102,12 @@ export default function ZunoMP() {
   useEffect(() => { myPlayerIndexRef.current = myPlayerIndex; }, [myPlayerIndex]);
   useEffect(() => { actingRef.current = acting; }, [acting]);
 
+  // Keep isMyTurnRef in sync so timer can check it without stale closure
+  useEffect(() => {
+    if (!gameState) return;
+    isMyTurnRef.current = gameState.currentPlayerIndex === myPlayerIndex && gameState.phase === "playing";
+  }, [gameState?.currentPlayerIndex, gameState?.phase, myPlayerIndex]);
+
   // Timer - same pattern as solo (setTimeout chain)
   useEffect(() => {
     if (!gameState) return;
@@ -111,13 +120,41 @@ export default function ZunoMP() {
   useEffect(() => {
     if (timeLeft === null) return;
     if (timeLeft === 0) {
-      if (!actingRef.current) sendAction({ type: "draw" });
+      // Double-check it's still our turn before auto-drawing
+      if (!actingRef.current && isMyTurnRef.current) sendAction({ type: "draw" });
       return;
     }
     const t = setTimeout(() => setTimeLeft(n => n !== null ? n - 1 : null), 1000);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft]);
+
+  // Auto-draw when forced (+2/+4 with no counter possible)
+  useEffect(() => {
+    if (!gameState) return;
+    const myTurn = gameState.currentPlayerIndex === myPlayerIndex && gameState.phase === "playing";
+    if (!myTurn || gameState.pendingDrawCount === 0) return;
+    // Check if any card in hand can counter
+    const top = gameState.discardPile[gameState.discardPile.length - 1];
+    const myHand = gameState.players[myPlayerIndex]?.hand ?? [];
+    const canCounter = myHand.some(c => {
+      if (top.value === "draw2") return c.value === "draw2";
+      if (top.value === "wild4") return c.value === "wild4";
+      return false;
+    });
+    if (canCounter) return; // player can counter, don't auto-draw
+
+    const t = setTimeout(() => {
+      const handEl = handScrollRef.current;
+      if (!handEl) return;
+      const to = handEl.getBoundingClientRect();
+      const toX = to.left + to.width / 2 - 40, toY = to.top + 10;
+      didDrawLocallyRef.current = true;
+      startDrawChain(gameState.pendingDrawCount, toX, toY, true);
+    }, 700);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState?.currentPlayerIndex, gameState?.pendingDrawCount, myPlayerIndex]);
 
   const handScrollCallbackRef = useCallback((el: HTMLDivElement | null) => {
     const prev = handScrollRef.current;
@@ -139,6 +176,19 @@ export default function ZunoMP() {
     const dummy: SanitizedCard = { id: `_draw_${flyKeyRef.current}`, color: "wild", value: "wild" };
     setFlyDraw({ card: dummy, fromX, fromY, toX, toY, faceDown: true, key: flyKeyRef.current });
   }, []);
+
+  // Start a chain of N draw animations; if sendAfter=true, fire the server action after the last one
+  const startDrawChain = useCallback((count: number, toX: number, toY: number, sendAfter: boolean) => {
+    const deckEl = deckRef.current;
+    if (!deckEl || count <= 0) {
+      if (sendAfter) sendAction({ type: "draw" });
+      return;
+    }
+    const from = deckEl.getBoundingClientRect();
+    drawFlyQueueRef.current = { fromX: from.left, fromY: from.top, toX, toY, remaining: count - 1, sendAfter };
+    triggerFlyDraw(from.left, from.top, toX, toY);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerFlyDraw]);
 
   const applyNewState = useCallback((newState: GameState, newIdx: number) => {
     const prev = prevStateRef.current;
@@ -175,11 +225,15 @@ export default function ZunoMP() {
             if (!deckEl) return;
             const from = deckEl.getBoundingClientRect();
             if (i === newIdx) {
-              const handEl = handScrollRef.current;
-              if (handEl) {
-                const to = handEl.getBoundingClientRect();
-                triggerFlyDraw(from.left, from.top, to.left + to.width / 2 - 40, to.top + 10);
+              // Only animate if we didn't already trigger it from handleDraw()
+              if (!didDrawLocallyRef.current) {
+                const handEl = handScrollRef.current;
+                if (handEl) {
+                  const to = handEl.getBoundingClientRect();
+                  triggerFlyDraw(from.left, from.top, to.left + to.width / 2 - 40, to.top + 10);
+                }
               }
+              didDrawLocallyRef.current = false;
             } else {
               const badgeEl = playerBadgeRefs.current[i];
               if (badgeEl) {
@@ -226,8 +280,8 @@ export default function ZunoMP() {
       });
       const data = await res.json();
       if (res.ok && data.gameState) applyNewState(data.gameState, myPlayerIndexRef.current);
-      else if (!res.ok) setError(data.error || "Erreur");
-    } catch { setError("Erreur réseau"); }
+      // Ignore action rejections (timing errors like "Ce n'est pas ton tour") — poll will catch up
+    } catch { /* ignore network errors */ }
     setActing(false);
     actingRef.current = false;
   }
@@ -236,9 +290,17 @@ export default function ZunoMP() {
     const card = gameState?.players[myPlayerIndexRef.current]?.hand.find(c => c.id === cardId);
     if (!card) return;
     const cardEl = document.querySelector<HTMLElement>(`[data-card-id="${cardId}"]`);
-    if (cardEl) {
-      const r = cardEl.getBoundingClientRect();
-      pendingPlayFlyRef.current = { x: r.left, y: r.top, card };
+    const discardEl = discardRef.current;
+    if (cardEl && discardEl) {
+      const from = cardEl.getBoundingClientRect();
+      const to = discardEl.getBoundingClientRect();
+      pendingPlayFlyRef.current = { x: from.left, y: from.top, card };
+      if (card.color === "wild") {
+        // Fly first, show color picker after animation
+        setPendingCardId(cardId);
+        triggerFly(card, from.left, from.top, to.left, to.top, false);
+        return;
+      }
     }
     if (card.color === "wild") { setPendingCardId(cardId); setPickingColor(true); return; }
     sendAction({ type: "play", cardId });
@@ -252,14 +314,19 @@ export default function ZunoMP() {
   }
 
   function handleDraw() {
-    const deckEl = deckRef.current;
+    // Manual draw: player chose to draw (either no cards or choosing not to counter)
+    // For regular draw (no pending), animate 1 card then send
+    // For pending draw with counter option, animate all pending then send
+    const count = gameState?.pendingDrawCount || 1;
     const handEl = handScrollRef.current;
-    if (deckEl && handEl) {
-      const from = deckEl.getBoundingClientRect();
+    if (handEl) {
       const to = handEl.getBoundingClientRect();
-      triggerFlyDraw(from.left, from.top, to.left + to.width / 2 - 40, to.top + 10);
+      const toX = to.left + to.width / 2 - 40, toY = to.top + 10;
+      didDrawLocallyRef.current = true;
+      startDrawChain(count, toX, toY, true);
+    } else {
+      sendAction({ type: "draw" });
     }
-    sendAction({ type: "draw" });
   }
 
   async function handleLeave() {
@@ -358,8 +425,29 @@ export default function ZunoMP() {
       {pickingColor && !confirmQuit && <ColorPicker onPick={handleColorPick} />}
       {timeLeft !== null && timeLeft <= 3 && <div className="danger-overlay" />}
 
-      {flyCard && <FlyingCard key={flyCard.key} card={flyCard.card} fromX={flyCard.fromX} fromY={flyCard.fromY} toX={flyCard.toX} toY={flyCard.toY} faceDown={flyCard.faceDown} onDone={() => setFlyCard(null)} />}
-      {flyDraw && <FlyingCard key={flyDraw.key} card={flyDraw.card} fromX={flyDraw.fromX} fromY={flyDraw.fromY} toX={flyDraw.toX} toY={flyDraw.toY} faceDown={true} onDone={() => setFlyDraw(null)} />}
+      {flyCard && <FlyingCard key={flyCard.key} card={flyCard.card} fromX={flyCard.fromX} fromY={flyCard.fromY} toX={flyCard.toX} toY={flyCard.toY} faceDown={flyCard.faceDown} onDone={() => {
+        setFlyCard(null);
+        // If a wild card just flew, now show the color picker
+        if (pendingCardId) setPickingColor(true);
+      }} />}
+      {flyDraw && <FlyingCard key={flyDraw.key} card={flyDraw.card} fromX={flyDraw.fromX} fromY={flyDraw.fromY} toX={flyDraw.toX} toY={flyDraw.toY} faceDown={true} onDone={() => {
+        const q = drawFlyQueueRef.current;
+        if (q && q.remaining > 0) {
+          const deckEl = deckRef.current;
+          if (deckEl) {
+            const from = deckEl.getBoundingClientRect();
+            drawFlyQueueRef.current = { ...q, remaining: q.remaining - 1 };
+            flyKeyRef.current += 1;
+            const dummy: SanitizedCard = { id: `_draw_${flyKeyRef.current}`, color: "wild", value: "wild" };
+            setFlyDraw({ card: dummy, fromX: from.left, fromY: from.top, toX: q.toX, toY: q.toY, faceDown: true, key: flyKeyRef.current });
+          } else { drawFlyQueueRef.current = null; setFlyDraw(null); }
+        } else {
+          const sendAfter = q?.sendAfter ?? false;
+          drawFlyQueueRef.current = null;
+          setFlyDraw(null);
+          if (sendAfter) sendAction({ type: "draw" });
+        }
+      }} />}
 
       {/* Confirm quitter */}
       {confirmQuit && (
