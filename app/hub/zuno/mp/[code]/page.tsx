@@ -40,8 +40,10 @@ export default function ZunoMP() {
   const [logKey, setLogKey] = useState(0);
   const [vscale, setVscale] = useState(1);
   const [newCardAnim, setNewCardAnim] = useState(0); // increments to retrigger discard anim
+  const [timeLeft, setTimeLeft] = useState(30);
   const prevStateRef = useRef<GameState | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const handScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -50,6 +52,32 @@ export default function ZunoMP() {
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
+
+  // Timer: 30s per turn, auto-draw at 0
+  useEffect(() => {
+    if (!gameState) return;
+    const myTurn = gameState.currentPlayerIndex === myPlayerIndex && gameState.phase === "playing";
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (!myTurn) return;
+    setTimeLeft(30);
+    timerRef.current = setInterval(() => {
+      setTimeLeft(t => {
+        if (t <= 1) { clearInterval(timerRef.current!); timerRef.current = null; return 0; }
+        return t - 1;
+      });
+    }, 1000);
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState?.currentPlayerIndex, gameState?.phase, myPlayerIndex]);
+
+  // Auto-draw when timer hits 0
+  useEffect(() => {
+    if (timeLeft !== 0) return;
+    if (gameState?.currentPlayerIndex === myPlayerIndex && gameState?.phase === "playing" && !acting) {
+      sendAction({ type: "draw" });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
 
   const handScrollCallbackRef = useCallback((el: HTMLDivElement | null) => {
     const prev = handScrollRef.current;
@@ -88,7 +116,7 @@ export default function ZunoMP() {
 
   useEffect(() => {
     fetchState();
-    pollRef.current = setInterval(fetchState, 2000);
+    pollRef.current = setInterval(fetchState, 1000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchState]);
 
@@ -293,8 +321,13 @@ export default function ZunoMP() {
         </div>
         {/* Statut */}
         <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
-          <div style={{ fontSize:"0.85rem", fontWeight:800, whiteSpace:"nowrap", color:isMyTurn?"#f59e0b":"#64748b", padding:"5px 18px", borderRadius:999, background:isMyTurn?"rgba(245,158,11,0.13)":"rgba(255,255,255,0.04)", border:`1px solid ${isMyTurn?"rgba(245,158,11,0.4)":"rgba(255,255,255,0.07)"}`, transition:"all 0.4s" }}>
-            {isMyTurn ? "🫵 Votre tour" : `Au tour de ${gameState.players[gameState.currentPlayerIndex]?.name}…`}
+          <div style={{ fontSize:"0.85rem", fontWeight:800, whiteSpace:"nowrap", color:isMyTurn?"#f59e0b":"#64748b", padding:"5px 18px", borderRadius:999, background:isMyTurn?"rgba(245,158,11,0.13)":"rgba(255,255,255,0.04)", border:`1px solid ${isMyTurn?"rgba(245,158,11,0.4)":"rgba(255,255,255,0.07)"}`, transition:"all 0.4s", display:"flex", alignItems:"center", gap:8 }}>
+            {isMyTurn ? (
+              <>
+                <span>🫵 Votre tour</span>
+                <span style={{ fontSize:"0.75rem", fontWeight:900, color: timeLeft <= 5 ? "#ef4444" : timeLeft <= 10 ? "#f97316" : "#f59e0b", background:"rgba(0,0,0,0.3)", borderRadius:999, padding:"1px 8px", minWidth:28, textAlign:"center", transition:"color 0.3s" }}>{timeLeft}s</span>
+              </>
+            ) : `Au tour de ${gameState.players[gameState.currentPlayerIndex]?.name}…`}
           </div>
           <div key={logKey} className="log-badge">{gameState.lastAction}</div>
         </div>
@@ -317,7 +350,12 @@ export default function ZunoMP() {
             </span>
             {canCounter && (
               <button className="draw-btn" style={{ marginLeft:6 }} onClick={() => !acting && sendAction({ type:"draw" })}>
-                Piocher {gameState.pendingDrawCount} (ou contrer)
+                Piocher +{gameState.pendingDrawCount} (ou contrer)
+              </button>
+            )}
+            {mustDraw && gameState.pendingDrawCount > 0 && !canCounter && (
+              <button className="draw-btn" style={{ marginLeft:6 }} onClick={() => !acting && sendAction({ type:"draw" })}>
+                Piocher +{gameState.pendingDrawCount}
               </button>
             )}
           </div>
