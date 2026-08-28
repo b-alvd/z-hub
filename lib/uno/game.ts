@@ -118,12 +118,10 @@ export function playCard(state: GameState, cardId: string, chosenColor?: CardCol
       break;
     case "draw2":
       pendingDraw += 2;
-      skip = true;
       actionMsg += ` · +2 (total: +${pendingDraw})`;
       break;
     case "wild4":
       pendingDraw += 4;
-      skip = true;
       actionMsg += ` · +4 (total: +${pendingDraw})`;
       break;
   }

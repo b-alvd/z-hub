@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import UnoCard from "@/components/UnoCard";
@@ -39,8 +39,10 @@ export default function ZunoMP() {
   const [acting, setActing] = useState(false);
   const [logKey, setLogKey] = useState(0);
   const [vscale, setVscale] = useState(1);
+  const [newCardAnim, setNewCardAnim] = useState(0); // increments to retrigger discard anim
+  const prevStateRef = useRef<GameState | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const handScrollRef = useRef<HTMLDivElement>(null);
+  const handScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const update = () => setVscale(Math.min(window.innerWidth / 1366, window.innerHeight / 768, 1));
@@ -49,23 +51,40 @@ export default function ZunoMP() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  const handScrollCallbackRef = (el: HTMLDivElement | null) => {
-    if (handScrollRef.current) handScrollRef.current.removeEventListener("wheel", (handScrollRef.current as any)._wheelHandler);
-    (handScrollRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+  const handScrollCallbackRef = useCallback((el: HTMLDivElement | null) => {
+    const prev = handScrollRef.current;
+    if (prev) prev.removeEventListener("wheel", (prev as any)._wheelHandler);
+    handScrollRef.current = el;
     if (!el) return;
     const handler = (e: WheelEvent) => { e.preventDefault(); el.scrollLeft += e.deltaY + e.deltaX; };
     (el as any)._wheelHandler = handler;
     el.addEventListener("wheel", handler, { passive: false });
-  };
+  }, []);
+
+  const applyNewState = useCallback((newState: GameState, newIdx: number) => {
+    const prev = prevStateRef.current;
+    if (prev) {
+      const prevTop = prev.discardPile[prev.discardPile.length - 1];
+      const nextTop = newState.discardPile[newState.discardPile.length - 1];
+      if (prevTop?.id !== nextTop?.id) setNewCardAnim(n => n + 1);
+      if (prev.lastAction !== newState.lastAction) setLogKey(k => k + 1);
+    } else {
+      setLogKey(k => k + 1);
+    }
+    prevStateRef.current = newState;
+    setGameState(newState);
+    setMyPlayerIndex(newIdx);
+  }, []);
 
   const fetchState = useCallback(async () => {
-    const res = await fetch(`/api/rooms/${code}`);
-    if (!res.ok) { setError("Partie introuvable"); return; }
-    const data = await res.json();
-    if (data.status === "waiting") { router.replace(`/hub/zuno/lobby/${code}`); return; }
-    if (data.gameState) { setGameState(data.gameState); setLogKey(k => k + 1); }
-    setMyPlayerIndex(data.myPlayerIndex);
-  }, [code, router]);
+    try {
+      const res = await fetch(`/api/rooms/${code}`);
+      if (!res.ok) { if (res.status === 404) { setError("Partie introuvable"); } return; }
+      const data = await res.json();
+      if (data.status === "waiting") { router.replace(`/hub/zuno/lobby/${code}`); return; }
+      if (data.gameState) applyNewState(data.gameState, data.myPlayerIndex);
+    } catch { /* ignore network errors */ }
+  }, [code, router, applyNewState]);
 
   useEffect(() => {
     fetchState();
@@ -76,10 +95,14 @@ export default function ZunoMP() {
   async function sendAction(body: object) {
     if (acting) return;
     setActing(true);
-    const res = await fetch(`/api/rooms/${code}/action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const data = await res.json();
-    if (res.ok && data.gameState) { setGameState(data.gameState); setLogKey(k => k + 1); }
-    else if (!res.ok) setError(data.error || "Erreur");
+    try {
+      const res = await fetch(`/api/rooms/${code}/action`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok && data.gameState) applyNewState(data.gameState, myPlayerIndex);
+      else if (!res.ok) setError(data.error || "Erreur");
+    } catch { setError("Erreur réseau"); }
     setActing(false);
   }
 
@@ -92,8 +115,9 @@ export default function ZunoMP() {
 
   function handleColorPick(color: CardColor) {
     setPickingColor(false);
-    if (pendingCardId) sendAction({ type: "play", cardId: pendingCardId, color });
+    const id = pendingCardId;
     setPendingCardId(null);
+    if (id) sendAction({ type: "play", cardId: id, color });
   }
 
   if (error) return (
@@ -134,31 +158,36 @@ export default function ZunoMP() {
   const me = gameState.players[myPlayerIndex];
   const isMyTurn = gameState.currentPlayerIndex === myPlayerIndex && gameState.phase === "playing";
   const top = topCard(gameState);
-  const canPlayCard = (card: SanitizedCard) => {
-    if (gameState.pendingDrawCount > 0) return (card.value === "draw2" && top.value === "draw2") || (card.value === "wild4" && top.value === "wild4");
-    return card.color === "wild" || card.color === gameState.currentColor || card.value === top.value;
-  };
+
+  function canPlayCard(card: SanitizedCard) {
+    if (gameState!.pendingDrawCount > 0) {
+      const t = top;
+      if (t.value === "draw2") return card.value === "draw2";
+      if (t.value === "wild4") return card.value === "wild4";
+      return false;
+    }
+    return card.color === "wild" || card.color === gameState!.currentColor || card.value === top.value;
+  }
+
   const playableIds = new Set(isMyTurn ? (me?.hand ?? []).filter(canPlayCard).map(c => c.id) : []);
   const mustDraw = isMyTurn && playableIds.size === 0;
   const canCounter = isMyTurn && gameState.pendingDrawCount > 0 && playableIds.size > 0;
 
   // Arc positioning for other players
-  const others = gameState.players.filter((_, i) => i !== myPlayerIndex);
+  const others = gameState.players.map((p, i) => ({ ...p, origIdx: i })).filter(p => p.origIdx !== myPlayerIndex);
   const numOthers = others.length;
   const badgeW = Math.round((numOthers <= 4 ? 200 : numOthers <= 6 ? 170 : 145) * vscale);
   const badgeH = Math.round(120 * vscale);
-  const arcRadius = Math.round(320 * vscale);
-  const totalArc = Math.min(numOthers * 34, 290);
-  const arcMid = -90, arcStart = arcMid - totalArc / 2, arcEnd = arcMid + totalArc / 2;
-  const otherAbsPos = others.map((_, i) => {
+  const arcRadius = Math.round(310 * vscale);
+  const totalArc = Math.min(numOthers * 40, 280);
+  const arcStart = -90 - totalArc / 2, arcEnd = -90 + totalArc / 2;
+
+  const otherPositions = others.map((_, i) => {
     const deg = numOthers === 1 ? -90 : arcStart + (arcEnd - arcStart) * i / (numOthers - 1);
     const rad = (deg * Math.PI) / 180;
     const x = Math.round(Math.cos(rad) * arcRadius), y = Math.round(Math.sin(rad) * arcRadius);
     return { left:`calc(50% + ${x}px - ${badgeW / 2}px)`, top:`calc(46% + ${y}px - ${badgeH / 2}px)` };
   });
-
-  // Map other players back to their original index for avatar color
-  const otherOriginalIndices = gameState.players.map((_, i) => i).filter(i => i !== myPlayerIndex);
 
   return (
     <div style={{ position:"fixed", inset:0 }}>
@@ -195,15 +224,14 @@ export default function ZunoMP() {
         </div>
       </div>
 
-      {/* BADGES AUTRES JOUEURS en arc */}
+      {/* BADGES AUTRES JOUEURS */}
       {others.map((player, i) => {
-        const origIdx = otherOriginalIndices[i];
-        const isCurrent = gameState.currentPlayerIndex === origIdx;
+        const isCurrent = gameState.currentPlayerIndex === player.origIdx;
         const count = player.handCount;
         const fanCount = Math.min(count, 9), fanSpacing = 14, cardW = 32, cardH = 46;
         return (
           <div key={player.id} style={{
-            position:"absolute", ...otherAbsPos[i], zIndex:20,
+            position:"absolute", ...otherPositions[i], zIndex:20,
             display:"flex", flexDirection:"column", alignItems:"center", gap:7,
             padding:"8px 10px 10px", width:badgeW,
             background: isCurrent?"rgba(245,158,11,0.07)":"rgba(6,12,24,0.88)",
@@ -213,15 +241,16 @@ export default function ZunoMP() {
             transition:"border-color 0.3s, background 0.3s, box-shadow 0.3s",
           }}>
             <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-              <div className={`avatar${isCurrent?" active":""}`} style={{ background:AVATAR_BG[origIdx % AVATAR_BG.length], width:30, height:30, fontSize:"0.72rem", flexShrink:0 }}>{player.name[0]}</div>
+              <div className={`avatar${isCurrent?" active":""}`} style={{ background:AVATAR_BG[player.origIdx % AVATAR_BG.length], width:30, height:30, fontSize:"0.72rem", flexShrink:0 }}>{player.name[0]}</div>
               <div style={{ minWidth:0 }}>
-                <div style={{ fontSize:"0.68rem", fontWeight:700, color: isCurrent?"#f59e0b":"#cbd5e1", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:badgeW-60 }}>{player.name}</div>
-                <div style={{ fontSize:"0.55rem", color: isCurrent?"#d97706":"#475569" }}>{count} carte{count!==1?"s":""}</div>
+                <div style={{ fontSize:"0.68rem", fontWeight:700, color:isCurrent?"#f59e0b":"#cbd5e1", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:badgeW-60 }}>{player.name}</div>
+                <div style={{ fontSize:"0.55rem", color:isCurrent?"#d97706":"#475569" }}>{count} carte{count!==1?"s":""}</div>
               </div>
+              {isCurrent && <div className="thinking-dots" style={{ transform:"scale(0.65)", flexShrink:0 }}><div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/></div>}
             </div>
             <div style={{ position:"relative", width:badgeW-20, height:cardH+6 }}>
               {Array.from({ length: fanCount }).map((_, j) => {
-                const center = (fanCount-1)/2, offset=(j-center)*fanSpacing, rot=(j-center)*3, yUp=Math.abs(j-center)*0.6;
+                const center=(fanCount-1)/2, offset=(j-center)*fanSpacing, rot=(j-center)*3, yUp=Math.abs(j-center)*0.6;
                 return <div key={j} style={{ position:"absolute", left:`calc(50% + ${offset}px - ${cardW/2}px)`, top:yUp, transform:`rotate(${rot}deg)`, transformOrigin:"bottom center", filter:isCurrent?"brightness(1.15)":"brightness(0.7)", transition:"filter 0.3s" }}><UnoCard card={{ id:`back-${j}`, color:"wild", value:"wild" }} size="mini" faceDown={true} /></div>;
               })}
             </div>
@@ -241,29 +270,30 @@ export default function ZunoMP() {
         <div style={{ display:"flex", alignItems:"center", gap:20 }}>
           {/* Deck */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-            <div className={`card pile-card card-back ${mustDraw?"draw-pile-must": isMyTurn && gameState.pendingDrawCount===0?"draw-pile":"draw-pile-off"}`}
-              onClick={() => { if ((mustDraw || (isMyTurn && gameState.pendingDrawCount===0)) && !acting) sendAction({ type:"draw" }); }}>
+            <div className={`card pile-card card-back ${mustDraw?"draw-pile-must":isMyTurn&&gameState.pendingDrawCount===0?"draw-pile":"draw-pile-off"}`}
+              style={{ cursor:(mustDraw||(isMyTurn&&gameState.pendingDrawCount===0))&&!acting?"pointer":"default" }}
+              onClick={() => { if ((mustDraw||(isMyTurn&&gameState.pendingDrawCount===0))&&!acting) sendAction({ type:"draw" }); }}>
               <div className="card-face"><div className="card-oval"/><span className="card-back-label">ZUNO</span></div>
             </div>
             <span style={{ fontSize:"0.6rem", color:"#374151" }}>{gameState.deck}</span>
           </div>
-          {/* Direction + pending */}
+          {/* Direction */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
             <div className="dir-ring" style={{ transform:`rotate(${gameState.direction===1?0:180}deg)` }}>↻</div>
             {gameState.pendingDrawCount > 0 && <span className="pending-badge">+{gameState.pendingDrawCount}</span>}
           </div>
           {/* Discard */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-            <UnoCard key={top.id} card={top} size="pile" />
+            <UnoCard key={`${top.id}-${newCardAnim}`} card={top} size="pile" className="card-land" />
             <div className="color-chip" style={{ background:COLOR_DOT[gameState.currentColor]+"22", color:COLOR_DOT[gameState.currentColor] }}>
               <span style={{ width:7, height:7, borderRadius:"50%", background:COLOR_DOT[gameState.currentColor], display:"inline-block", flexShrink:0 }} />
               {COLOR_NAME[gameState.currentColor]}
             </div>
           </div>
         </div>
-        {/* Tour */}
+        {/* Statut */}
         <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
-          <div style={{ fontSize:"0.85rem", fontWeight:800, whiteSpace:"nowrap", color: isMyTurn?"#f59e0b":"#64748b", padding:"5px 18px", borderRadius:999, background: isMyTurn?"rgba(245,158,11,0.13)":"rgba(255,255,255,0.04)", border:`1px solid ${isMyTurn?"rgba(245,158,11,0.4)":"rgba(255,255,255,0.07)"}`, transition:"all 0.4s" }}>
+          <div style={{ fontSize:"0.85rem", fontWeight:800, whiteSpace:"nowrap", color:isMyTurn?"#f59e0b":"#64748b", padding:"5px 18px", borderRadius:999, background:isMyTurn?"rgba(245,158,11,0.13)":"rgba(255,255,255,0.04)", border:`1px solid ${isMyTurn?"rgba(245,158,11,0.4)":"rgba(255,255,255,0.07)"}`, transition:"all 0.4s" }}>
             {isMyTurn ? "🫵 Votre tour" : `Au tour de ${gameState.players[gameState.currentPlayerIndex]?.name}…`}
           </div>
           <div key={logKey} className="log-badge">{gameState.lastAction}</div>
@@ -282,11 +312,11 @@ export default function ZunoMP() {
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 18px 0" }}>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <div className={`avatar${isMyTurn?" active":""}`} style={{ background:"#10b981", width:30, height:30, fontSize:"0.75rem" }}>V</div>
-            <span style={{ fontSize:"0.8rem", fontWeight:700, color: isMyTurn?"#f1f5f9":"#94a3b8" }}>
+            <span style={{ fontSize:"0.8rem", fontWeight:700, color:isMyTurn?"#f1f5f9":"#94a3b8" }}>
               Vous <span style={{ fontWeight:500, color:"#64748b" }}>· {me?.hand.length ?? 0} carte{(me?.hand.length??0)!==1?"s":""}</span>
             </span>
             {canCounter && (
-              <button className="draw-btn" style={{ marginLeft:6 }} onClick={() => sendAction({ type:"draw" })}>
+              <button className="draw-btn" style={{ marginLeft:6 }} onClick={() => !acting && sendAction({ type:"draw" })}>
                 Piocher {gameState.pendingDrawCount} (ou contrer)
               </button>
             )}
@@ -300,7 +330,8 @@ export default function ZunoMP() {
                 const p = playableIds.has(card.id);
                 return (
                   <motion.div key={card.id} data-card-id={card.id}
-                    initial={{ opacity:0, y:30, scale:0.85 }} animate={{ opacity:1, y:0, scale:1 }}
+                    initial={{ opacity:0, y:30, scale:0.85 }}
+                    animate={{ opacity:1, y:0, scale:1 }}
                     exit={{ opacity:0, scale:0.7, transition:{ duration:0.1 } }}
                     transition={{ duration:0.3, ease:[0.34,1.56,0.64,1] }}
                     style={{ flexShrink:0 }}>
