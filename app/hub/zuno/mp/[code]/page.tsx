@@ -83,7 +83,10 @@ export default function ZunoMP() {
   const myPlayerIndexRef = useRef(-1);
   const actingRef = useRef(false);
   const isMyTurnRef = useRef(false);
-  const didDrawLocallyRef = useRef(false); // prevents double draw animation
+  const didDrawLocallyRef = useRef(false);
+  const flyCardActiveRef = useRef(false); // true while a play-fly animation is in progress
+  const bufferedStateRef = useRef<{ state: GameState; idx: number } | null>(null); // state buffered during fly
+  const pendingColorPickRef = useRef<string | null>(null); // wild card waiting for color pick after fly
   const drawFlyQueueRef = useRef<{ fromX: number; fromY: number; toX: number; toY: number; remaining: number; sendAfter: boolean } | null>(null);
   const pendingPlayFlyRef = useRef<{ x: number; y: number; card: SanitizedCard } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -168,6 +171,7 @@ export default function ZunoMP() {
 
   const triggerFly = useCallback((card: SanitizedCard, fromX: number, fromY: number, toX: number, toY: number, faceDown: boolean) => {
     flyKeyRef.current += 1;
+    flyCardActiveRef.current = true;
     setFlyCard({ card, fromX, fromY, toX, toY, faceDown, key: flyKeyRef.current });
   }, []);
 
@@ -220,26 +224,29 @@ export default function ZunoMP() {
         // Check for draws
         prev.players.forEach((pp, i) => {
           const np = newState.players[i];
-          if (np && np.handCount > pp.handCount) {
-            const deckEl = deckRef.current;
-            if (!deckEl) return;
-            const from = deckEl.getBoundingClientRect();
-            if (i === newIdx) {
-              // Only animate if we didn't already trigger it from handleDraw()
-              if (!didDrawLocallyRef.current) {
-                const handEl = handScrollRef.current;
-                if (handEl) {
-                  const to = handEl.getBoundingClientRect();
-                  triggerFlyDraw(from.left, from.top, to.left + to.width / 2 - 40, to.top + 10);
-                }
+          if (!np || np.handCount <= pp.handCount) return;
+          const drawnCount = np.handCount - pp.handCount;
+          const deckEl = deckRef.current;
+          if (!deckEl) return;
+          const from = deckEl.getBoundingClientRect();
+          if (i === newIdx) {
+            if (!didDrawLocallyRef.current) {
+              const handEl = handScrollRef.current;
+              if (handEl) {
+                const to = handEl.getBoundingClientRect();
+                const toX = to.left + to.width / 2 - 40, toY = to.top + 10;
+                drawFlyQueueRef.current = { fromX: from.left, fromY: from.top, toX, toY, remaining: drawnCount - 1, sendAfter: false };
+                triggerFlyDraw(from.left, from.top, toX, toY);
               }
-              didDrawLocallyRef.current = false;
-            } else {
-              const badgeEl = playerBadgeRefs.current[i];
-              if (badgeEl) {
-                const to = badgeEl.getBoundingClientRect();
-                triggerFlyDraw(from.left, from.top, to.left + to.width / 2 - 40, to.top + to.height / 2 - 58);
-              }
+            }
+            didDrawLocallyRef.current = false;
+          } else {
+            const badgeEl = playerBadgeRefs.current[i];
+            if (badgeEl) {
+              const to = badgeEl.getBoundingClientRect();
+              const toX = to.left + to.width / 2 - 40, toY = to.top + to.height / 2 - 58;
+              drawFlyQueueRef.current = { fromX: from.left, fromY: from.top, toX, toY, remaining: drawnCount - 1, sendAfter: false };
+              triggerFlyDraw(from.left, from.top, toX, toY);
             }
           }
         });
@@ -250,8 +257,14 @@ export default function ZunoMP() {
       setLogKey(k => k + 1);
     }
     prevStateRef.current = newState;
-    setGameState(newState);
-    setMyPlayerIndex(newIdx);
+    // If a play-fly animation is in progress, buffer the state update so the card
+    // doesn't pop onto the discard pile before the animation reaches it
+    if (flyCardActiveRef.current) {
+      bufferedStateRef.current = { state: newState, idx: newIdx };
+    } else {
+      setGameState(newState);
+      setMyPlayerIndex(newIdx);
+    }
   }, [triggerFly, triggerFlyDraw]);
 
   const fetchState = useCallback(async () => {
@@ -296,7 +309,8 @@ export default function ZunoMP() {
       const to = discardEl.getBoundingClientRect();
       pendingPlayFlyRef.current = { x: from.left, y: from.top, card };
       if (card.color === "wild") {
-        // Fly first, show color picker after animation
+        // Fly first, show color picker after animation completes
+        pendingColorPickRef.current = cardId;
         setPendingCardId(cardId);
         triggerFly(card, from.left, from.top, to.left, to.top, false);
         return;
@@ -426,9 +440,20 @@ export default function ZunoMP() {
       {timeLeft !== null && timeLeft <= 3 && <div className="danger-overlay" />}
 
       {flyCard && <FlyingCard key={flyCard.key} card={flyCard.card} fromX={flyCard.fromX} fromY={flyCard.fromY} toX={flyCard.toX} toY={flyCard.toY} faceDown={flyCard.faceDown} onDone={() => {
+        flyCardActiveRef.current = false;
         setFlyCard(null);
-        // If a wild card just flew, now show the color picker
-        if (pendingCardId) setPickingColor(true);
+        // Apply buffered state now that the animation is done
+        if (bufferedStateRef.current) {
+          const { state, idx } = bufferedStateRef.current;
+          bufferedStateRef.current = null;
+          setGameState(state);
+          setMyPlayerIndex(idx);
+        }
+        // Show color picker for wild cards
+        if (pendingColorPickRef.current) {
+          pendingColorPickRef.current = null;
+          setPickingColor(true);
+        }
       }} />}
       {flyDraw && <FlyingCard key={flyDraw.key} card={flyDraw.card} fromX={flyDraw.fromX} fromY={flyDraw.fromY} toX={flyDraw.toX} toY={flyDraw.toY} faceDown={true} onDone={() => {
         const q = drawFlyQueueRef.current;
