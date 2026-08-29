@@ -280,12 +280,11 @@ body {
 
 /* ── CARD PLAYED : atterrit sur la défausse ───────────── */
 @keyframes card-land {
-  0%   { transform: translateY(-90px) scale(0.5) rotate(18deg); opacity: 0; }
-  55%  { transform: translateY(8px)   scale(1.1) rotate(-4deg); opacity: 1; }
-  78%  { transform: translateY(-4px)  scale(0.97) rotate(1deg); }
+  0%   { transform: translateY(-60px) scale(0.6) rotate(12deg); opacity: 0; }
+  60%  { transform: translateY(4px)   scale(1.07) rotate(-2deg); opacity: 1; }
   100% { transform: translateY(0)     scale(1)   rotate(0deg);  opacity: 1; }
 }
-.card-land { animation: card-land 0.55s cubic-bezier(.34,1.56,.64,1) both; }
+.card-land { animation: card-land 0.3s cubic-bezier(.34,1.56,.64,1) both; }
 
 /* ── CARD REVEAL : flip face visible après pioche ────── */
 @keyframes card-flip-reveal {

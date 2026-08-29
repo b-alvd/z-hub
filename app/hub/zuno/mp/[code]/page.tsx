@@ -50,8 +50,8 @@ function FlyingCard({ card, fromX, fromY, toX, toY, faceDown, onDone }: { card: 
   return (
     <motion.div
       initial={{ x: fromX, y: fromY, scale: 1, opacity: 1, rotate: 0 }}
-      animate={{ x: toX, y: toY, scale: [1, 1.45, 1.1], opacity: 1, rotate: [0, -8, 3, 0] }}
-      transition={{ duration: 0.52, ease: [0.25, 0.46, 0.45, 0.94], times: [0, 0.45, 1] }}
+      animate={{ x: toX, y: toY, scale: [1, 1.3, 1.05], opacity: 1, rotate: [0, -6, 2, 0] }}
+      transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94], times: [0, 0.45, 1] }}
       onAnimationComplete={onDone}
       style={{ position:"fixed", top:0, left:0, zIndex:9999, pointerEvents:"none", width:80, height:116, filter:"drop-shadow(0 12px 28px rgba(0,0,0,0.7))" }}
     >
@@ -86,7 +86,6 @@ export default function ZunoMP() {
   const didDrawLocallyRef = useRef(false);
   const flyCardActiveRef = useRef(false); // true while a play-fly animation is in progress
   const bufferedStateRef = useRef<{ state: GameState; idx: number } | null>(null); // state buffered during fly
-  const pendingColorPickRef = useRef<string | null>(null); // wild card waiting for color pick after fly
   const drawFlyQueueRef = useRef<{ fromX: number; fromY: number; toX: number; toY: number; remaining: number; sendAfter: boolean } | null>(null);
   const pendingPlayFlyRef = useRef<{ x: number; y: number; card: SanitizedCard } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -104,6 +103,13 @@ export default function ZunoMP() {
 
   useEffect(() => { myPlayerIndexRef.current = myPlayerIndex; }, [myPlayerIndex]);
   useEffect(() => { actingRef.current = acting; }, [acting]);
+
+  // Show color picker once the wild-card fly animation has fully landed
+  useEffect(() => {
+    if (flyCard === null && pendingCardId !== null && !pickingColor) {
+      setPickingColor(true);
+    }
+  }, [flyCard]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep isMyTurnRef in sync so timer can check it without stale closure
   useEffect(() => {
@@ -154,7 +160,7 @@ export default function ZunoMP() {
       const toX = to.left + to.width / 2 - 40, toY = to.top + 10;
       didDrawLocallyRef.current = true;
       startDrawChain(gameState.pendingDrawCount, toX, toY, true);
-    }, 700);
+    }, 400);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState?.currentPlayerIndex, gameState?.pendingDrawCount, myPlayerIndex]);
@@ -309,8 +315,7 @@ export default function ZunoMP() {
       const to = discardEl.getBoundingClientRect();
       pendingPlayFlyRef.current = { x: from.left, y: from.top, card };
       if (card.color === "wild") {
-        // Fly first, show color picker after animation completes
-        pendingColorPickRef.current = cardId;
+        // Fly card first — color picker opens when flyCard→null (see useEffect)
         setPendingCardId(cardId);
         triggerFly(card, from.left, from.top, to.left, to.top, false);
         return;
@@ -442,18 +447,14 @@ export default function ZunoMP() {
       {flyCard && <FlyingCard key={flyCard.key} card={flyCard.card} fromX={flyCard.fromX} fromY={flyCard.fromY} toX={flyCard.toX} toY={flyCard.toY} faceDown={flyCard.faceDown} onDone={() => {
         flyCardActiveRef.current = false;
         setFlyCard(null);
-        // Apply buffered state now that the animation is done
+        // Apply state that was buffered while the animation was in flight
         if (bufferedStateRef.current) {
           const { state, idx } = bufferedStateRef.current;
           bufferedStateRef.current = null;
           setGameState(state);
           setMyPlayerIndex(idx);
         }
-        // Show color picker for wild cards
-        if (pendingColorPickRef.current) {
-          pendingColorPickRef.current = null;
-          setPickingColor(true);
-        }
+        // Color picker (if wild card) is triggered by the flyCard→null useEffect above
       }} />}
       {flyDraw && <FlyingCard key={flyDraw.key} card={flyDraw.card} fromX={flyDraw.fromX} fromY={flyDraw.fromY} toX={flyDraw.toX} toY={flyDraw.toY} faceDown={true} onDone={() => {
         const q = drawFlyQueueRef.current;
@@ -616,10 +617,10 @@ export default function ZunoMP() {
                 const p = playableIds.has(card.id);
                 return (
                   <motion.div key={card.id} data-card-id={card.id}
-                    initial={{ opacity:0, y:30, scale:0.85 }}
+                    initial={{ opacity:0, y:20, scale:0.88 }}
                     animate={{ opacity:1, y:0, scale:1 }}
-                    exit={{ opacity:0, scale:0.7, transition:{ duration:0.1 } }}
-                    transition={{ duration:0.3, ease:[0.34,1.56,0.64,1] }}
+                    exit={{ opacity:0, scale:0.7, transition:{ duration:0.08 } }}
+                    transition={{ duration:0.18, ease:[0.34,1.56,0.64,1] }}
                     style={{ flexShrink:0 }}>
                     <UnoCard card={card} size="hand" playable={p} disabled={isMyTurn && !p} onClick={p && !acting ? () => handlePlay(card.id) : undefined} />
                   </motion.div>
