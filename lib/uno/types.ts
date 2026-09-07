@@ -14,6 +14,7 @@ export interface Player {
   name: string;
   hand: Card[];
   isAI: boolean;
+  left?: boolean;
 }
 
 export type Direction = 1 | -1;

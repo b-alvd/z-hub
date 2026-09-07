@@ -7,7 +7,7 @@ import ColorPicker from "@/components/ColorPicker";
 import { CardColor, CardValue } from "@/lib/uno/types";
 
 type SanitizedCard = { id: string; color: CardColor; value: CardValue };
-type SanitizedPlayer = { id: string; name: string; isAI: boolean; handCount: number; hand: SanitizedCard[] };
+type SanitizedPlayer = { id: string; name: string; isAI: boolean; left: boolean; handCount: number; hand: SanitizedCard[] };
 type GameState = {
   deck: number;
   discardPile: SanitizedCard[];
@@ -67,6 +67,7 @@ export default function ZunoMP() {
   const router = useRouter();
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [myPlayerIndex, setMyPlayerIndex] = useState(-1);
+  const [isHost, setIsHost] = useState(false);
   const [pickingColor, setPickingColor] = useState(false);
   const [pendingCardId, setPendingCardId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -77,6 +78,7 @@ export default function ZunoMP() {
   const [flyCard, setFlyCard] = useState<FlyState | null>(null);
   const [flyDraw, setFlyDraw] = useState<FlyState | null>(null);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [globalTimer, setGlobalTimer] = useState<number | null>(null); // timer for the current player (any)
 
   const flyKeyRef = useRef(0);
   const prevStateRef = useRef<GameState | null>(null);
@@ -129,7 +131,6 @@ export default function ZunoMP() {
   useEffect(() => {
     if (timeLeft === null) return;
     if (timeLeft === 0) {
-      // Double-check it's still our turn before auto-drawing
       if (!actingRef.current && isMyTurnRef.current) sendAction({ type: "draw" });
       return;
     }
@@ -137,6 +138,19 @@ export default function ZunoMP() {
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft]);
+
+  // Global timer: visible on the opponent badge when it's their turn
+  useEffect(() => {
+    if (!gameState) return;
+    setGlobalTimer(30);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState?.currentPlayerIndex, gameState?.phase]);
+
+  useEffect(() => {
+    if (globalTimer === null || globalTimer === 0) return;
+    const t = setTimeout(() => setGlobalTimer(n => n !== null ? n - 1 : null), 1000);
+    return () => clearTimeout(t);
+  }, [globalTimer]);
 
   // Auto-draw when forced (+2/+4 with no counter possible)
   useEffect(() => {
@@ -279,6 +293,7 @@ export default function ZunoMP() {
       if (!res.ok) { if (res.status === 404) { setError("Partie introuvable"); } return; }
       const data = await res.json();
       if (data.status === "waiting") { router.replace(`/hub/zuno/lobby/${code}`); return; }
+      if (data.isHost !== undefined) setIsHost(data.isHost);
       if (data.gameState) applyNewState(data.gameState, data.myPlayerIndex);
     } catch { /* ignore */ }
   }, [code, router, applyNewState]);
@@ -389,6 +404,10 @@ export default function ZunoMP() {
   if (gameState.phase === "won") {
     const me = gameState.players[myPlayerIndex];
     const isMe = gameState.winner === me?.name;
+    const handleRematch = async () => {
+      await fetch(`/api/rooms/${code}/rematch`, { method: "POST" });
+      // Poll will detect status==="waiting" and redirect to lobby
+    };
     return (
       <main style={{ minHeight:"100dvh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20, background:"#030b07" }}>
         <div style={{ width:72, height:72, borderRadius:20, display:"flex", alignItems:"center", justifyContent:"center", background:isMe?"rgba(245,158,11,0.1)":"rgba(148,163,184,0.08)", border:`1px solid ${isMe?"rgba(245,158,11,0.3)":"rgba(148,163,184,0.15)"}` }}>
@@ -398,9 +417,12 @@ export default function ZunoMP() {
           }
         </div>
         <h2 style={{ fontSize:"2.5rem", fontWeight:900, color:isMe?"#f59e0b":"#94a3b8" }}>{isMe ? "Vous avez gagné !" : `${gameState.winner} a gagné !`}</h2>
-        <div style={{ display:"flex", gap:12, marginTop:8 }}>
-          <a href="/hub/zuno" style={{ padding:"12px 28px", borderRadius:12, background:"linear-gradient(135deg,#f59e0b,#ef4444)", color:"#fff", fontWeight:800, textDecoration:"none", fontSize:"0.9rem" }}>Rejouer</a>
-          <a href="/hub" style={{ padding:"12px 28px", borderRadius:12, background:"rgba(255,255,255,0.06)", color:"#94a3b8", fontWeight:700, textDecoration:"none", fontSize:"0.9rem", border:"1px solid rgba(255,255,255,0.08)" }}>Hub</a>
+        <div style={{ display:"flex", gap:12, marginTop:8, flexDirection:"column", alignItems:"center" }}>
+          {isHost
+            ? <button onClick={handleRematch} style={{ padding:"12px 28px", borderRadius:12, background:"linear-gradient(135deg,#f59e0b,#ef4444)", color:"#fff", fontWeight:800, fontSize:"0.9rem", border:"none", cursor:"pointer", fontFamily:"inherit" }}>Relancer une partie</button>
+            : <div style={{ padding:"10px 24px", borderRadius:12, background:"rgba(255,255,255,0.04)", color:"#64748b", fontWeight:600, fontSize:"0.85rem", border:"1px solid rgba(255,255,255,0.08)" }}>En attente de l&apos;hôte…</div>
+          }
+          <a href="/hub" style={{ padding:"10px 24px", borderRadius:12, background:"rgba(255,255,255,0.06)", color:"#94a3b8", fontWeight:700, textDecoration:"none", fontSize:"0.85rem", border:"1px solid rgba(255,255,255,0.08)" }}>Retour au hub</a>
         </div>
       </main>
     );
@@ -424,7 +446,13 @@ export default function ZunoMP() {
   const canCounter = isMyTurn && gameState.pendingDrawCount > 0 && playableIds.size > 0;
   const mustDrawPenalty = mustDraw && gameState.pendingDrawCount > 0;
 
-  const others = gameState.players.map((p, i) => ({ ...p, origIdx: i })).filter(p => p.origIdx !== myPlayerIndex);
+  // Arrange others in relative turn order starting from the player just after me,
+  // so the arc always reads "who plays next" from left to right.
+  const n = gameState.players.length;
+  const others = Array.from({ length: n - 1 }, (_, step) => {
+    const idx = (myPlayerIndex + 1 + step + n) % n;
+    return { ...gameState.players[idx], origIdx: idx };
+  }).filter(p => !p.left);
   const numOthers = others.length;
   const badgeW = Math.round((numOthers <= 4 ? 200 : numOthers <= 6 ? 170 : 145) * vscale);
   const badgeH = Math.round(120 * vscale);
@@ -443,6 +471,7 @@ export default function ZunoMP() {
     <div style={{ position:"fixed", inset:0 }}>
       {pickingColor && !confirmQuit && <ColorPicker onPick={handleColorPick} />}
       {timeLeft !== null && timeLeft <= 3 && <div className="danger-overlay" />}
+      {globalTimer !== null && globalTimer <= 3 && !isMyTurnRef.current && gameState?.phase === "playing" && <div className="danger-overlay" />}
 
       {flyCard && <FlyingCard key={flyCard.key} card={flyCard.card} fromX={flyCard.fromX} fromY={flyCard.fromY} toX={flyCard.toX} toY={flyCard.toY} faceDown={flyCard.faceDown} onDone={() => {
         flyCardActiveRef.current = false;
@@ -531,6 +560,7 @@ export default function ZunoMP() {
                 <div style={{ fontSize:"0.55rem", color:isCurrent?"#d97706":"#475569" }}>{count} carte{count!==1?"s":""}</div>
               </div>
               {isCurrent && <div className="thinking-dots" style={{ transform:"scale(0.65)", flexShrink:0 }}><div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/></div>}
+            {isCurrent && globalTimer !== null && <TurnTimer timeLeft={globalTimer} />}
             </div>
             <div style={{ position:"relative", width:badgeW-20, height:cardH+6 }}>
               {Array.from({ length: fanCount }).map((_, j) => {
@@ -564,7 +594,8 @@ export default function ZunoMP() {
           </div>
           {/* Direction */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-            <div className="dir-ring" style={{ transform:`rotate(${gameState.direction===1?0:180}deg)` }}>↻</div>
+            <div className="dir-ring" style={{ transition:"transform 0.5s ease" }}>{gameState.direction===1?"↻":"↺"}</div>
+            <span style={{ fontSize:"0.5rem", color:"#374151", fontWeight:700, letterSpacing:"0.05em" }}>{gameState.direction===1?"→":"←"}</span>
             {gameState.pendingDrawCount > 0 && <span className="pending-badge">+{gameState.pendingDrawCount}</span>}
           </div>
           {/* Discard */}
@@ -596,9 +627,9 @@ export default function ZunoMP() {
       }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 18px 0" }}>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <div className={`avatar${isMyTurn?" active":""}`} style={{ background:"#10b981", width:30, height:30, fontSize:"0.75rem" }}>V</div>
+            <div className={`avatar${isMyTurn?" active":""}`} style={{ background:"#10b981", width:30, height:30, fontSize:"0.75rem" }}>{(me?.name?.[0] ?? "V").toUpperCase()}</div>
             <span style={{ fontSize:"0.8rem", fontWeight:700, color:isMyTurn?"#f1f5f9":"#94a3b8" }}>
-              Vous <span style={{ fontWeight:500, color:"#64748b" }}>· {me?.hand.length ?? 0} carte{(me?.hand.length??0)!==1?"s":""}</span>
+              {me?.name ?? "Vous"} <span style={{ fontWeight:500, color:"#64748b" }}>(vous) · {me?.hand.length ?? 0} carte{(me?.hand.length??0)!==1?"s":""}</span>
             </span>
             {(canCounter || mustDrawPenalty) && (
               <button className="draw-btn" style={{ marginLeft:6 }} onClick={() => !acting && handleDraw()}>

@@ -1,5 +1,5 @@
 import { Card, CardColor, GameState, Player } from "./types";
-import { createDeck, shuffle } from "./deck";
+import { createDeck } from "./deck";
 
 export function initGame(playerNames: string[]): GameState {
   const deck = createDeck();
@@ -57,8 +57,14 @@ export function canPlay(card: Card, state: GameState): boolean {
 
 function nextIndex(state: GameState, skip = false): number {
   const n = state.players.length;
-  let idx = (state.currentPlayerIndex + state.direction + n) % n;
-  if (skip) idx = (idx + state.direction + n) % n;
+  let idx = state.currentPlayerIndex;
+  let steps = skip ? 2 : 1;
+  while (steps > 0) {
+    idx = (idx + state.direction + n) % n;
+    if (!state.players[idx]?.left) steps--;
+    // safety: if all others left, stop
+    if (idx === state.currentPlayerIndex) break;
+  }
   return idx;
 }
 
@@ -168,15 +174,11 @@ export function drawCards(state: GameState): GameState {
   const count = state.pendingDrawCount > 0 ? state.pendingDrawCount : 1;
 
   let deck = [...state.deck];
-  let discard = [...state.discardPile];
 
-  if (deck.length < count) {
-    const top = discard.pop()!;
-    deck = [...deck, ...shuffle(discard)];
-    discard = [top];
-  }
+  // No reshuffle — limited deck; draw as many as available
+  const actualCount = Math.min(count, deck.length);
 
-  const drawn = deck.splice(deck.length - count, count);
+  const drawn = deck.splice(deck.length - actualCount, actualCount);
   const newPlayers = state.players.map((p, i) =>
     i === state.currentPlayerIndex ? { ...p, hand: [...p.hand, ...drawn] } : p
   );
@@ -184,10 +186,11 @@ export function drawCards(state: GameState): GameState {
   const newState: GameState = {
     ...state,
     deck,
-    discardPile: discard,
     players: newPlayers,
     pendingDrawCount: 0,
-    lastAction: `${player.name} pioche ${count} carte${count > 1 ? "s" : ""}`,
+    lastAction: actualCount > 0
+      ? `${player.name} pioche ${actualCount} carte${actualCount > 1 ? "s" : ""}`
+      : `${player.name} passe (pioche vide)`,
   };
   newState.currentPlayerIndex = nextIndex(newState);
   return newState;

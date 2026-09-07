@@ -45,6 +45,7 @@ export function sanitizeState(state: GameState, myPlayerIndex: number) {
       id: p.id,
       name: p.name,
       isAI: p.isAI,
+      left: p.left ?? false,
       handCount: p.hand.length,
       hand: i === myPlayerIndex ? p.hand : [],
     })),
