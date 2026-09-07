@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { deserializeState, serializeState, sanitizeState, runAITurns, RoomPlayer } from "@/lib/rooms";
-import { playCard, drawCards, pickColor, canPlay } from "@/lib/uno/game";
+import { playCard, drawCards, drawOneNoAdvance, nextIndex, pickColor, canPlay } from "@/lib/uno/game";
 import { CardColor } from "@/lib/uno/types";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ code: string }> }) {
@@ -42,6 +42,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cod
     state = playCard(state, cardId, color as CardColor | undefined);
   } else if (type === "draw") {
     state = drawCards(state);
+  } else if (type === "drawOne") {
+    // Voluntary single draw — does not advance turn; client decides to play or pass
+    const { state: next, drawnCard } = drawOneNoAdvance(state);
+    state = next;
+    const drawnPlayable = drawnCard ? canPlay(drawnCard, state) : false;
+    if (!drawnPlayable) state = { ...state, currentPlayerIndex: nextIndex(state) };
+    state = runAITurns(state);
+    const now2 = Date.now();
+    await db.execute({ sql: "UPDATE game_rooms SET game_state = ?, updated_at = ? WHERE code = ?", args: [serializeState(state), now2, code] });
+    return NextResponse.json({ gameState: sanitizeState(state, me.playerIndex), drawnCardId: drawnCard?.id ?? null, drawnPlayable });
+  } else if (type === "pass") {
+    // Player chose not to play the drawn card
+    state = { ...state, currentPlayerIndex: nextIndex(state) };
   } else if (type === "pickColor") {
     state = pickColor(state, color as CardColor);
   } else {

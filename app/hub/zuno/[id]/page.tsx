@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { GameState, CardColor, Card } from "@/lib/uno/types";
-import { initGame, playCard, drawCards, aiPlay, pickColor, canPlay, topCard, colorName } from "@/lib/uno/game";
+import { initGame, playCard, drawCards, drawOneNoAdvance, nextIndex, aiPlay, pickColor, canPlay, topCard, colorName } from "@/lib/uno/game";
 import UnoCard from "@/components/UnoCard";
 import ColorPicker from "@/components/ColorPicker";
 
@@ -83,6 +83,7 @@ export default function ZunoGame() {
   const [drawFly, setDrawFly] = useState<{ deckX: number; deckY: number; cardX: number; cardY: number; cardId: string } | null>(null);
   const [drawnHiddenId, setDrawnHiddenId] = useState<string | null>(null);
   const [drawnFlipId, setDrawnFlipId] = useState<string | null>(null);
+  const [drawnPlayableId, setDrawnPlayableId] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const pendingDrawFlyRef = useRef<{ deckX: number; deckY: number; newCardId: string } | null>(null);
   const prevHandRef = useRef<string[]>([]);
@@ -276,12 +277,22 @@ export default function ZunoGame() {
     if (!state) return;
     const deckRect = deckRef.current?.getBoundingClientRect();
     if (deckRect && state.pendingDrawCount === 0) {
-      // Draw 1 card — fly it to its position in hand
-      const next = drawCards(state);
-      const prevIds = new Set(state.players[0].hand.map((c) => c.id));
-      const newCard = next.players[0].hand.find((c) => !prevIds.has(c.id));
-      if (newCard) { pendingDrawFlyRef.current = { deckX: deckRect.left, deckY: deckRect.top, newCardId: newCard.id }; setDrawnHiddenId(newCard.id); }
-      update(next);
+      // Draw 1 card voluntarily — fly it, then offer to play if it's playable
+      const { state: next, drawnCard } = drawOneNoAdvance(state);
+      if (drawnCard) {
+        pendingDrawFlyRef.current = { deckX: deckRect.left, deckY: deckRect.top, newCardId: drawnCard.id };
+        setDrawnHiddenId(drawnCard.id);
+        // Check if the drawn card is playable against the current state
+        if (canPlay(drawnCard, state)) setDrawnPlayableId(drawnCard.id);
+        else {
+          // Not playable — advance turn immediately
+          setState({ ...next, currentPlayerIndex: nextIndex(next) });
+          setLogKey(k => k + 1);
+          return;
+        }
+      }
+      setState(next);
+      setLogKey(k => k + 1);
     } else {
       // Draw N cards — animate them one by one toward the hand area
       const count = state.pendingDrawCount;
@@ -433,10 +444,17 @@ export default function ZunoGame() {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-            <div ref={deckRef} className={`card pile-card card-back ${mustDraw ? "draw-pile-must" : isHumanTurn && state.pendingDrawCount === 0 ? "draw-pile" : "draw-pile-off"}`} onClick={mustDraw || (isHumanTurn && state.pendingDrawCount === 0) ? handleHumanDraw : undefined}>
-              <div className="card-face"><div className="card-oval"/><span className="card-back-label">ZUNO</span></div>
-            </div>
-            <span style={{ fontSize: "0.6rem", color: "#374151" }}>{state.deck.length}</span>
+            {state.deck.length > 0
+              ? <>
+                  <div ref={deckRef} className={`card pile-card card-back ${mustDraw ? "draw-pile-must" : isHumanTurn && state.pendingDrawCount === 0 ? "draw-pile" : "draw-pile-off"}`} onClick={mustDraw || (isHumanTurn && state.pendingDrawCount === 0) ? handleHumanDraw : undefined}>
+                    <div className="card-face"><div className="card-oval"/><span className="card-back-label">ZUNO</span></div>
+                  </div>
+                  <span style={{ fontSize: "0.6rem", color: "#374151" }}>{state.deck.length}</span>
+                </>
+              : <div ref={deckRef} style={{ width:60, height:88, borderRadius:10, border:"1.5px dashed rgba(255,255,255,0.1)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <span style={{ fontSize:"0.55rem", color:"#374151", textAlign:"center", lineHeight:1.3 }}>Pioche<br/>vide</span>
+                </div>
+            }
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
             <div className="dir-ring" style={{ transition:"transform 0.5s ease" }}>{state.direction === 1 ? "↻" : "↺"}</div>
@@ -472,6 +490,7 @@ export default function ZunoGame() {
             <div className={`avatar${isHumanTurn ? " active" : ""}`} style={{ background: "#10b981", width: 30, height: 30, fontSize: "0.75rem" }}>{pseudo[0]?.toUpperCase() ?? "V"}</div>
             <span style={{ fontSize: "0.8rem", fontWeight: 700, color: isHumanTurn ? "#f1f5f9" : "#94a3b8" }}>{pseudo} <span style={{ fontWeight: 500, color: "#64748b" }}>(vous) · {human.hand.length} carte{human.hand.length !== 1 ? "s" : ""}</span></span>
             {canCounter && <button className="draw-btn" style={{ marginLeft: 6 }} onClick={handleHumanDraw}>Piocher {state.pendingDrawCount} (ou contrer)</button>}
+            {drawnPlayableId && <button className="draw-btn" style={{ marginLeft: 6, background:"rgba(34,197,94,0.15)", borderColor:"rgba(34,197,94,0.4)", color:"#22c55e" }} onClick={() => { setDrawnPlayableId(null); setState(s => s ? { ...s, currentPlayerIndex: nextIndex(s) } : s); setLogKey(k => k + 1); }}>Passer</button>}
           </div>
           {isHumanTurn && timeLeft !== null ? <TurnTimer timeLeft={timeLeft} /> : <span style={{ fontSize: "0.68rem", color: "#1e293b" }}>En attente…</span>}
         </div>
@@ -479,7 +498,7 @@ export default function ZunoGame() {
           <div style={{ display: "flex", gap: 7, alignItems: "flex-end", minWidth: "max-content", padding: "16px 18px" }}>
             <AnimatePresence initial={false} mode="popLayout">
               {human.hand.map((card) => {
-                const p = playableIds.has(card.id);
+                const p = playableIds.has(card.id) || drawnPlayableId === card.id;
                 return (
                   <motion.div key={card.id} data-card-id={card.id}
                     initial={{ opacity: 0, y: 30, scale: 0.85 }} animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -488,7 +507,7 @@ export default function ZunoGame() {
                     style={{ flexShrink: 0, visibility: drawnHiddenId === card.id ? "hidden" : "visible" }}
                   >
                     <div className={drawnFlipId === card.id ? "card-flip-reveal" : ""}>
-                      <UnoCard card={card} size="hand" playable={p} disabled={isHumanTurn && !p} onClick={p ? () => handleHumanPlay(card.id) : undefined} />
+                      <UnoCard card={card} size="hand" playable={p} disabled={isHumanTurn && !p && !drawnPlayableId} onClick={p ? () => { setDrawnPlayableId(null); handleHumanPlay(card.id); } : undefined} />
                     </div>
                   </motion.div>
                 );

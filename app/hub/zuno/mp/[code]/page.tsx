@@ -78,7 +78,8 @@ export default function ZunoMP() {
   const [flyCard, setFlyCard] = useState<FlyState | null>(null);
   const [flyDraw, setFlyDraw] = useState<FlyState | null>(null);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
-  const [globalTimer, setGlobalTimer] = useState<number | null>(null); // timer for the current player (any)
+  const [globalTimer, setGlobalTimer] = useState<number | null>(null);
+  const [drawnPlayableId, setDrawnPlayableId] = useState<string | null>(null);
 
   const flyKeyRef = useRef(0);
   const prevStateRef = useRef<GameState | null>(null);
@@ -347,19 +348,40 @@ export default function ZunoMP() {
     if (id) sendAction({ type: "play", cardId: id, color });
   }
 
-  function handleDraw() {
-    // Manual draw: player chose to draw (either no cards or choosing not to counter)
-    // For regular draw (no pending), animate 1 card then send
-    // For pending draw with counter option, animate all pending then send
-    const count = gameState?.pendingDrawCount || 1;
+  async function handleDraw() {
+    const pendingCount = gameState?.pendingDrawCount ?? 0;
     const handEl = handScrollRef.current;
-    if (handEl) {
-      const to = handEl.getBoundingClientRect();
-      const toX = to.left + to.width / 2 - 40, toY = to.top + 10;
-      didDrawLocallyRef.current = true;
-      startDrawChain(count, toX, toY, true);
+    if (pendingCount === 0) {
+      // Voluntary single draw — use drawOne action; server tells us if drawn card is playable
+      if (actingRef.current) return;
+      setActing(true); actingRef.current = true;
+      try {
+        const res = await fetch(`/api/rooms/${code}/action`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "drawOne" }),
+        });
+        const data = await res.json();
+        if (res.ok && data.gameState) {
+          didDrawLocallyRef.current = true;
+          if (handEl) {
+            const to = handEl.getBoundingClientRect();
+            const toX = to.left + to.width / 2 - 40, toY = to.top + 10;
+            startDrawChain(1, toX, toY, false);
+          }
+          applyNewState(data.gameState, myPlayerIndexRef.current);
+          if (data.drawnPlayable && data.drawnCardId) setDrawnPlayableId(data.drawnCardId);
+        }
+      } catch { /* ignore */ }
+      setActing(false); actingRef.current = false;
     } else {
-      sendAction({ type: "draw" });
+      if (handEl) {
+        const to = handEl.getBoundingClientRect();
+        const toX = to.left + to.width / 2 - 40, toY = to.top + 10;
+        didDrawLocallyRef.current = true;
+        startDrawChain(pendingCount, toX, toY, true);
+      } else {
+        sendAction({ type: "draw" });
+      }
     }
   }
 
@@ -584,13 +606,20 @@ export default function ZunoMP() {
         <div style={{ display:"flex", alignItems:"center", gap:20 }}>
           {/* Deck */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-            <div ref={deckRef}
-              className={`card pile-card card-back ${mustDraw||canCounter?"draw-pile-must":isMyTurn&&gameState.pendingDrawCount===0?"draw-pile":"draw-pile-off"}`}
-              style={{ cursor:(mustDraw||canCounter||(isMyTurn&&gameState.pendingDrawCount===0))&&!acting?"pointer":"default" }}
-              onClick={() => { if ((mustDraw||canCounter||(isMyTurn&&gameState.pendingDrawCount===0))&&!acting) handleDraw(); }}>
-              <div className="card-face"><div className="card-oval"/><span className="card-back-label">ZUNO</span></div>
-            </div>
-            <span style={{ fontSize:"0.6rem", color:"#374151" }}>{gameState.deck}</span>
+            {gameState.deck > 0
+              ? <>
+                  <div ref={deckRef}
+                    className={`card pile-card card-back ${mustDraw||canCounter?"draw-pile-must":isMyTurn&&gameState.pendingDrawCount===0?"draw-pile":"draw-pile-off"}`}
+                    style={{ cursor:(mustDraw||canCounter||(isMyTurn&&gameState.pendingDrawCount===0))&&!acting?"pointer":"default" }}
+                    onClick={() => { if ((mustDraw||canCounter||(isMyTurn&&gameState.pendingDrawCount===0))&&!acting) handleDraw(); }}>
+                    <div className="card-face"><div className="card-oval"/><span className="card-back-label">ZUNO</span></div>
+                  </div>
+                  <span style={{ fontSize:"0.6rem", color:"#374151" }}>{gameState.deck}</span>
+                </>
+              : <div ref={deckRef} style={{ width:60, height:88, borderRadius:10, border:"1.5px dashed rgba(255,255,255,0.1)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <span style={{ fontSize:"0.55rem", color:"#374151", textAlign:"center", lineHeight:1.3 }}>Pioche<br/>vide</span>
+                </div>
+            }
           </div>
           {/* Direction */}
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
@@ -636,6 +665,9 @@ export default function ZunoMP() {
                 Piocher +{gameState.pendingDrawCount}{canCounter ? " (ou contrer)" : ""}
               </button>
             )}
+            {drawnPlayableId && (
+              <button className="draw-btn" style={{ marginLeft:6, background:"rgba(34,197,94,0.15)", borderColor:"rgba(34,197,94,0.4)", color:"#22c55e" }} onClick={() => { setDrawnPlayableId(null); sendAction({ type: "pass" }); }}>Passer</button>
+            )}
           </div>
           {isMyTurn && timeLeft !== null
             ? <TurnTimer timeLeft={timeLeft} />
@@ -645,7 +677,7 @@ export default function ZunoMP() {
           <div style={{ display:"flex", gap:7, alignItems:"flex-end", minWidth:"max-content", padding:"16px 18px" }}>
             <AnimatePresence initial={false} mode="popLayout">
               {(me?.hand ?? []).map((card) => {
-                const p = playableIds.has(card.id);
+                const p = playableIds.has(card.id) || drawnPlayableId === card.id;
                 return (
                   <motion.div key={card.id} data-card-id={card.id}
                     initial={{ opacity:0, y:20, scale:0.88 }}
@@ -653,7 +685,7 @@ export default function ZunoMP() {
                     exit={{ opacity:0, scale:0.7, transition:{ duration:0.08 } }}
                     transition={{ duration:0.18, ease:[0.34,1.56,0.64,1] }}
                     style={{ flexShrink:0 }}>
-                    <UnoCard card={card} size="hand" playable={p} disabled={isMyTurn && !p} onClick={p && !acting ? () => handlePlay(card.id) : undefined} />
+                    <UnoCard card={card} size="hand" playable={p} disabled={isMyTurn && !p && !drawnPlayableId} onClick={p && !acting ? () => { setDrawnPlayableId(null); handlePlay(card.id); } : undefined} />
                   </motion.div>
                 );
               })}

@@ -55,7 +55,7 @@ export function canPlay(card: Card, state: GameState): boolean {
   return card.color === state.currentColor || card.value === topCard(state).value;
 }
 
-function nextIndex(state: GameState, skip = false): number {
+export function nextIndex(state: GameState, skip = false): number {
   const n = state.players.length;
   let idx = state.currentPlayerIndex;
   let steps = skip ? 2 : 1;
@@ -167,6 +167,21 @@ export function pickColor(state: GameState, color: CardColor): GameState {
   };
   newState.currentPlayerIndex = nextIndex(newState, skip);
   return newState;
+}
+
+// Draws 1 card voluntarily without advancing the turn, so the player can choose to play it.
+export function drawOneNoAdvance(state: GameState): { state: GameState; drawnCard: Card | null } {
+  let deck = [...state.deck];
+  if (deck.length === 0) return { state, drawnCard: null };
+  const drawn = deck.splice(deck.length - 1, 1);
+  const player = state.players[state.currentPlayerIndex];
+  const newPlayers = state.players.map((p, i) =>
+    i === state.currentPlayerIndex ? { ...p, hand: [...p.hand, ...drawn] } : p
+  );
+  return {
+    state: { ...state, deck, players: newPlayers, lastAction: `${player.name} pioche 1 carte` },
+    drawnCard: drawn[0],
+  };
 }
 
 export function drawCards(state: GameState): GameState {
