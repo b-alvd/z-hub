@@ -6,12 +6,38 @@ import { motion } from "framer-motion";
 export default function ZunoLobby() {
   const [numAI, setNumAI] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState("");
   const router = useRouter();
 
   function startGame() {
     const id = crypto.randomUUID();
     sessionStorage.setItem(`zuno_${id}`, JSON.stringify({ numAI }));
     router.push(`/hub/zuno/${id}`);
+  }
+
+  async function joinMulti() {
+    const code = joinCode.trim().toUpperCase();
+    if (!code) return;
+    setJoining(true);
+    setJoinError("");
+    const joinRes = await fetch(`/api/rooms/${code}/join`, { method: "POST" });
+    if (!joinRes.ok) {
+      const d = await joinRes.json();
+      setJoinError(d.error ?? "Erreur");
+      setJoining(false);
+      return;
+    }
+    const stateRes = await fetch(`/api/rooms/${code}`);
+    if (stateRes.ok) {
+      const data = await stateRes.json();
+      if (data.status === "playing") router.push(`/hub/zuno/mp/${code}`);
+      else router.push(`/hub/zuno/lobby/${code}`);
+    } else {
+      setJoinError("Partie introuvable");
+      setJoining(false);
+    }
   }
 
   async function createMulti() {
@@ -101,7 +127,7 @@ export default function ZunoLobby() {
       <motion.div
         initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5, duration: 0.5, ease: "easeOut" }}
-        style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", alignItems: "stretch", maxWidth: 580 }}
+        style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", alignItems: "stretch", maxWidth: 640 }}
       >
         {/* Solo */}
         <div style={{
@@ -148,7 +174,7 @@ export default function ZunoLobby() {
           display: "flex", flexDirection: "column", alignItems: "center",
           background: "rgba(99,102,241,0.04)", border: "1px solid rgba(99,102,241,0.22)",
           borderRadius: 22, padding: "22px 24px 20px", backdropFilter: "blur(12px)",
-          flex: "1 1 230px", gap: 0,
+          flex: "1 1 260px", gap: 0,
         }}>
           <div style={{ fontSize: "0.62rem", fontWeight: 800, color: "#3730a3", letterSpacing: "0.25em", textTransform: "uppercase", marginBottom: 4 }}>Multijoueur</div>
           <div style={{ fontSize: "0.63rem", color: "#374151", marginBottom: 14, textAlign: "center" }}>Joue avec tes amis en ligne</div>
@@ -176,6 +202,24 @@ export default function ZunoLobby() {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             {creating ? "Création…" : "Créer une salle"}
           </button>
+
+          <div style={{ width:"100%", display:"flex", alignItems:"center", gap:8, marginTop:8, marginBottom:8 }}>
+            <div style={{ flex:1, height:1, background:"rgba(255,255,255,0.06)" }} />
+            <span style={{ fontSize:"0.6rem", color:"#374151", fontWeight:700 }}>OU</span>
+            <div style={{ flex:1, height:1, background:"rgba(255,255,255,0.06)" }} />
+          </div>
+
+          <form onSubmit={e => { e.preventDefault(); joinMulti(); }} style={{ width:"100%", display:"flex", gap:6 }}>
+            <input
+              value={joinCode} onChange={e => { setJoinCode(e.target.value.toUpperCase()); setJoinError(""); }}
+              placeholder="CODE" maxLength={6}
+              style={{ flex:1, padding:"9px 12px", borderRadius:10, border:`1px solid ${joinError?"rgba(239,68,68,0.5)":"rgba(99,102,241,0.25)"}`, background:"rgba(255,255,255,0.04)", color:"#e2e8f0", fontFamily:"monospace", fontWeight:700, fontSize:"0.88rem", letterSpacing:"0.2em", outline:"none", textTransform:"uppercase" }}
+            />
+            <button type="submit" disabled={joining || !joinCode.trim()} style={{ padding:"9px 14px", borderRadius:10, border:"1px solid rgba(99,102,241,0.3)", background:"rgba(99,102,241,0.12)", color:"#a5b4fc", fontWeight:800, fontSize:"0.82rem", cursor:joining||!joinCode.trim()?"default":"pointer", fontFamily:"inherit" }}>
+              {joining ? "…" : "Rejoindre"}
+            </button>
+          </form>
+          {joinError && <span style={{ fontSize:"0.7rem", color:"#ef4444", fontWeight:600 }}>{joinError}</span>}
         </div>
       </motion.div>
     </main>

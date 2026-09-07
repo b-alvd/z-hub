@@ -65,6 +65,7 @@ export default function ZunoGame() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [numAI, setNumAI] = useState(1);
+  const [pseudo, setPseudo] = useState("Vous");
   const [state, setState] = useState<GameState | null>(null);
   const [vscale, setVscale] = useState(1);
   const [confirmQuit, setConfirmQuit] = useState(false);
@@ -99,18 +100,31 @@ export default function ZunoGame() {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(`zuno_${id}`);
-      if (raw) {
-        const config = JSON.parse(raw);
-        setNumAI(config.numAI);
-        startGameWith(config.numAI);
-      } else {
+    let cancelled = false;
+    async function init() {
+      let name = "Vous";
+      try {
+        const r = await fetch("/api/me");
+        if (r.ok) { const d = await r.json(); if (d?.username) name = d.username; }
+      } catch {}
+      if (cancelled) return;
+      setPseudo(name);
+      try {
+        const raw = sessionStorage.getItem(`zuno_${id}`);
+        if (raw) {
+          const config = JSON.parse(raw);
+          setNumAI(config.numAI);
+          startGameWith(config.numAI, name);
+        } else {
+          router.replace("/hub/zuno");
+        }
+      } catch {
         router.replace("/hub/zuno");
       }
-    } catch {
-      router.replace("/hub/zuno");
     }
+    init();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const handScrollCallbackRef = (el: HTMLDivElement | null) => {
@@ -124,11 +138,11 @@ export default function ZunoGame() {
 
   function update(next: GameState) { setState(next); setLogKey((k) => k + 1); }
 
-  function startGameWith(n: number) {
+  function startGameWith(n: number, name = pseudo) {
     prevHandRef.current = [];
     setAiThinking(false); setFlyHuman(null); setFlyAI(null);
     setDrawFly(null); setDrawnHiddenId(null); setDrawnFlipId(null);
-    update(initGame(["Vous", ...AI_NAMES.slice(0, n)]));
+    update(initGame([name, ...AI_NAMES.slice(0, n)]));
   }
 
   function startAIDrawAnimation(toX: number, toY: number, count: number) {
@@ -229,7 +243,7 @@ export default function ZunoGame() {
   if (!state) return null;
 
   if (state.phase === "won") {
-    const isMe = state.winner === "Vous";
+    const isMe = state.winner === pseudo;
     return (
       <main className="min-h-dvh flex flex-col items-center justify-center gap-6 px-6">
         <div style={{ width: 72, height: 72, borderRadius: 20, display: "flex", alignItems: "center", justifyContent: "center", background: isMe ? "rgba(245,158,11,0.1)" : "rgba(148,163,184,0.08)", border: `1px solid ${isMe ? "rgba(245,158,11,0.3)" : "rgba(148,163,184,0.15)"}` }}>
@@ -425,7 +439,7 @@ export default function ZunoGame() {
             <span style={{ fontSize: "0.6rem", color: "#374151" }}>{state.deck.length}</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-            <div className="dir-ring" style={{ transform: `rotate(${state.direction === 1 ? 0 : 180}deg)` }}>↻</div>
+            <div className="dir-ring" style={{ transition:"transform 0.5s ease" }}>{state.direction === 1 ? "↻" : "↺"}</div>
             {state.pendingDrawCount > 0 && <span className="pending-badge">+{state.pendingDrawCount}</span>}
           </div>
           <div ref={discardRef} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
@@ -455,8 +469,8 @@ export default function ZunoGame() {
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 18px 0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className={`avatar${isHumanTurn ? " active" : ""}`} style={{ background: "#10b981", width: 30, height: 30, fontSize: "0.75rem" }}>V</div>
-            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: isHumanTurn ? "#f1f5f9" : "#94a3b8" }}>Vous <span style={{ fontWeight: 500, color: "#64748b" }}>· {human.hand.length} carte{human.hand.length !== 1 ? "s" : ""}</span></span>
+            <div className={`avatar${isHumanTurn ? " active" : ""}`} style={{ background: "#10b981", width: 30, height: 30, fontSize: "0.75rem" }}>{pseudo[0]?.toUpperCase() ?? "V"}</div>
+            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: isHumanTurn ? "#f1f5f9" : "#94a3b8" }}>{pseudo} <span style={{ fontWeight: 500, color: "#64748b" }}>(vous) · {human.hand.length} carte{human.hand.length !== 1 ? "s" : ""}</span></span>
             {canCounter && <button className="draw-btn" style={{ marginLeft: 6 }} onClick={handleHumanDraw}>Piocher {state.pendingDrawCount} (ou contrer)</button>}
           </div>
           {isHumanTurn && timeLeft !== null ? <TurnTimer timeLeft={timeLeft} /> : <span style={{ fontSize: "0.68rem", color: "#1e293b" }}>En attente…</span>}

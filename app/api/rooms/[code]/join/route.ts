@@ -10,13 +10,16 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ co
 
   const roomRow = await db.execute({ sql: "SELECT status, num_ai FROM game_rooms WHERE code = ?", args: [code] });
   if (!roomRow.rows.length) return NextResponse.json({ error: "Partie introuvable" }, { status: 404 });
-  if (roomRow.rows[0][0] !== "waiting") return NextResponse.json({ error: "Partie déjà commencée" }, { status: 400 });
+  const status = roomRow.rows[0][0] as string;
 
   const alreadyIn = await db.execute({
     sql: "SELECT player_index FROM room_players WHERE room_code = ? AND user_id = ?",
     args: [code, user.id],
   });
+  // Allow rejoining a game in progress if the player was already in the room
   if (alreadyIn.rows.length) return NextResponse.json({ ok: true });
+
+  if (status !== "waiting") return NextResponse.json({ error: "Partie déjà commencée" }, { status: 400 });
 
   const countRow = await db.execute({ sql: "SELECT COUNT(*) FROM room_players WHERE room_code = ?", args: [code] });
   const count = countRow.rows[0][0] as number;
