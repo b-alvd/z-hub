@@ -466,7 +466,7 @@ export default function SolitairePage() {
 
   function startDrag(e: React.PointerEvent, src: Sel) {
     const s = gsRef.current;
-    if (src === null) return;
+    if (src === null || !s) return;
     if (src.from === "waste" && !s.waste.length) return;
     if (src.from === "tab" && !s.tableau[src.col][src.idx]?.faceUp) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -485,6 +485,7 @@ export default function SolitairePage() {
 
     function findDrop(x: number, y: number, cards: Card[]): DropTarget | null {
       const s = gsRef.current;
+      if (!s) return null;
       for (let p = 0; p < 4; p++) {
         const el = foundationRefs.current[p];
         if (!el) continue;
@@ -513,7 +514,7 @@ export default function SolitairePage() {
         if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
         d.started = true;
         // Read cards from current state and store in overlay-state
-        const cards = getCards(gsRef.current, d.src);
+        const cards = getCards(gsRef.current!, d.src);
         setDragCards(cards);
         setDragSrc(d.src);
         setSel(null);
@@ -531,7 +532,7 @@ export default function SolitairePage() {
       const ov = overlayRef.current;
       if (ov) ov.style.transform = `translate(${newX}px, ${newY}px) rotate(${rot}deg)`;
 
-      const cards = getCards(gsRef.current, d.src);
+      const cards = getCards(gsRef.current!, d.src);
       setHoverTarget(findDrop(e.clientX, e.clientY, cards));
     }
 
@@ -547,6 +548,7 @@ export default function SolitairePage() {
       setTimeout(() => { wasDrag.current = false; }, 80);
 
       const s = gsRef.current;
+      if (!s) return;
       const cards = getCards(s, d.src);
       const target = findDrop(e.clientX, e.clientY, cards);
       const ov = overlayRef.current;
@@ -571,6 +573,7 @@ export default function SolitairePage() {
 
         const src = d.src;
         setGs(s2 => {
+          if (!s2) return s2;
           const c2 = getCards(s2, src);
           if (!c2.length) return s2;
           return doMove(s2, src, c2, target);
@@ -611,6 +614,7 @@ export default function SolitairePage() {
     if (wasDrag.current) return;
     setSel(null);
     setGs(s => {
+      if (!s) return s;
       if (s.stock.length === 0)
         return { ...s, stock: [...s.waste].reverse().map(c => ({ ...c, faceUp: false })), waste: [], moves: s.moves + 1 };
       return { ...s, stock: s.stock.slice(0, -1), waste: [...s.waste, { ...s.stock.at(-1)!, faceUp: true }], moves: s.moves + 1 };
@@ -619,39 +623,40 @@ export default function SolitairePage() {
 
   function clickWaste() {
     if (wasDrag.current) return;
-    if (!gs.waste.length) return;
+    if (!gs || !gs.waste.length) return;
     if (sel?.from === "waste") { setSel(null); return; }
     setSel({ from: "waste" });
   }
 
   function dblClickWaste() {
     if (wasDrag.current) return;
-    if (!gs.waste.length) return;
+    if (!gs || !gs.waste.length) return;
     const fakeSel: Sel = { from: "waste" };
-    setGs(s => tryAutoF(s, fakeSel, getSelCards(s, fakeSel)) ?? s);
+    setGs(s => { if (!s) return s; return tryAutoF(s, fakeSel, getSelCards(s, fakeSel)) ?? s; });
     setSel(null);
   }
 
   function clickFoundation(p: number) {
     if (wasDrag.current) return;
-    if (!sel) return;
+    if (!sel || !gs) return;
     const cards = getSelCards(gs);
     if (cards.length === 1 && canF(cards[0], gs.foundations[p], p)) {
       const captured = sel;
-      setGs(s => doMove(s, captured, getSelCards(s, captured), { to: "f", p }));
+      setGs(s => { if (!s) return s; return doMove(s, captured, getSelCards(s, captured), { to: "f", p }); });
       setSel(null);
     }
   }
 
   function clickTabCard(col: number, idx: number) {
     if (wasDrag.current) return;
+    if (!gs) return;
     const card = gs.tableau[col][idx];
     if (!card.faceUp) return;
     if (!sel) { setSel({ from: "tab", col, idx }); return; }
     const cards = getSelCards(gs);
     if (cards.length > 0 && canT(cards[0], gs.tableau[col])) {
       const captured = sel;
-      setGs(s => doMove(s, captured, getSelCards(s, captured), { to: "t", col }));
+      setGs(s => { if (!s) return s; return doMove(s, captured, getSelCards(s, captured), { to: "t", col }); });
       setSel(null);
     } else {
       setSel({ from: "tab", col, idx });
@@ -660,10 +665,12 @@ export default function SolitairePage() {
 
   function dblClickTabCard(col: number, idx: number) {
     if (wasDrag.current) return;
+    if (!gs) return;
     if (idx !== gs.tableau[col].length - 1) return;
     if (!gs.tableau[col][idx]?.faceUp) return;
     const fakeSel: Sel = { from: "tab", col, idx };
     setGs(s => {
+      if (!s) return s;
       const cards = getSelCards(s, fakeSel);
       return tryAutoF(s, fakeSel, cards) ?? s;
     });
@@ -672,17 +679,17 @@ export default function SolitairePage() {
 
   function clickEmptyCol(col: number) {
     if (wasDrag.current) return;
-    if (!sel) return;
+    if (!sel || !gs) return;
     const cards = getSelCards(gs);
     if (cards.length > 0 && canT(cards[0], [])) {
       const captured = sel;
-      setGs(s => doMove(s, captured, getSelCards(s, captured), { to: "t", col }));
+      setGs(s => { if (!s) return s; return doMove(s, captured, getSelCards(s, captured), { to: "t", col }); });
       setSel(null);
     }
   }
 
   function showHint() {
-    if (gs.won || stuck) return;
+    if (!gs || gs.won || stuck) return;
     clearTimeout(hintTimer.current);
     const hints = findAllHints(gs);
     if (hints.length === 0) { setStuck(true); return; }
