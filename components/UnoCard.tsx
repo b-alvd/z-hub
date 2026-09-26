@@ -37,10 +37,12 @@ export default function UnoCard({
       aria-label={faceDown ? "Carte cachée" : `${card.color} ${card.value}`}
     >
       {faceDown ? (
-        <div className="card-face">
-          <div className="card-oval" />
-          <span className="card-back-label">ZUNO</span>
-        </div>
+        <img
+          src="/zuno/back_card.png"
+          alt="Carte cachée"
+          style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit", display: "block" }}
+          draggable={false}
+        />
       ) : (
         <div className="card-face">
           <div className="card-oval" />

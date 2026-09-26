@@ -75,6 +75,7 @@ export default function ZunoMP() {
   const [acting, setActing] = useState(false);
   const [logKey, setLogKey] = useState(0);
   const [vscale, setVscale] = useState(1);
+  const [winSize, setWinSize] = useState({ w: 0, h: 0 });
   const [flyCard, setFlyCard] = useState<FlyState | null>(null);
   const [flyDraw, setFlyDraw] = useState<FlyState | null>(null);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
@@ -98,7 +99,11 @@ export default function ZunoMP() {
   const handScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const update = () => setVscale(Math.min(window.innerWidth / 1366, window.innerHeight / 768, 1));
+    const update = () => {
+      const w = window.innerWidth, h = window.innerHeight;
+      setVscale(Math.min(w / 1366, h / 768, 1));
+      setWinSize({ w, h });
+    };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
@@ -476,9 +481,10 @@ export default function ZunoMP() {
     return { ...gameState.players[idx], origIdx: idx };
   }).filter(p => !p.left);
   const numOthers = others.length;
-  const badgeW = Math.round((numOthers <= 4 ? 200 : numOthers <= 6 ? 170 : 145) * vscale);
-  const badgeH = Math.round(120 * vscale);
-  const arcRadius = Math.round(310 * vscale);
+  const isMobileLayout = winSize.w > 0 && Math.min(winSize.w, winSize.h) < 500;
+  const badgeW = Math.round((isMobileLayout ? (numOthers <= 4 ? 110 : numOthers <= 6 ? 95 : 80) : (numOthers <= 4 ? 200 : numOthers <= 6 ? 170 : 145)) * vscale);
+  const badgeH = Math.round((isMobileLayout ? 56 : 120) * vscale);
+  const arcRadius = Math.round((isMobileLayout ? 260 : 310) * vscale);
   const totalArc = Math.min(numOthers * 40, 280);
   const arcStart = -90 - totalArc / 2, arcEnd = -90 + totalArc / 2;
 
@@ -489,8 +495,17 @@ export default function ZunoMP() {
     return { left:`calc(50% + ${x}px - ${badgeW / 2}px)`, top:`calc(46% + ${y}px - ${badgeH / 2}px)` };
   });
 
+  const isMobileDevice = winSize.w > 0 && Math.min(winSize.w, winSize.h) < 500;
+
   return (
     <div style={{ position:"fixed", inset:0 }}>
+      {isMobileDevice && (
+        <div style={{ position:"fixed", inset:0, zIndex:99999, background:"rgba(4,10,16,0.97)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+          <p style={{ color:"rgba(255,255,255,0.7)", fontWeight:700, fontSize:"0.95rem", textAlign:"center", margin:0, lineHeight:1.5 }}>ZUNO Multijoueur<br/><span style={{ fontSize:"0.78rem", color:"rgba(255,255,255,0.35)", fontWeight:500 }}>disponible sur desktop uniquement</span></p>
+          <a href="/hub/zuno" style={{ marginTop:8, padding:"10px 22px", borderRadius:10, background:"rgba(99,102,241,0.12)", border:"1px solid rgba(99,102,241,0.3)", color:"#a5b4fc", fontWeight:700, fontSize:"0.82rem", textDecoration:"none" }}>Retour</a>
+        </div>
+      )}
       {pickingColor && !confirmQuit && <ColorPicker onPick={handleColorPick} />}
       {timeLeft !== null && timeLeft <= 3 && <div className="danger-overlay" />}
       {globalTimer !== null && globalTimer <= 3 && !isMyTurnRef.current && gameState?.phase === "playing" && <div className="danger-overlay" />}
@@ -561,35 +576,37 @@ export default function ZunoMP() {
       {others.map((player, i) => {
         const isCurrent = gameState.currentPlayerIndex === player.origIdx;
         const count = player.handCount;
-        const fanCount = Math.min(count, 9), fanSpacing = 14, cardW = 32, cardH = 46;
+        const fanCount = isMobileLayout ? 0 : Math.min(count, 9);
+        const fanSpacing = 14, cardW = 32, cardH = 46;
         return (
           <div key={player.id}
             ref={el => { playerBadgeRefs.current[player.origIdx] = el; }}
             style={{
               position:"absolute", ...otherPositions[i], zIndex:20,
-              display:"flex", flexDirection:"column", alignItems:"center", gap:7,
-              padding:"8px 10px 10px", width:badgeW,
+              display:"flex", flexDirection:"column", alignItems:"center", gap: isMobileLayout ? 4 : 7,
+              padding: isMobileLayout ? "6px 8px" : "8px 10px 10px", width:badgeW,
               background:isCurrent?"rgba(245,158,11,0.07)":"rgba(6,12,24,0.88)",
               border:`1.5px solid ${isCurrent?"rgba(245,158,11,0.5)":"rgba(255,255,255,0.07)"}`,
-              borderRadius:20, backdropFilter:"blur(16px)",
+              borderRadius: isMobileLayout ? 12 : 20, backdropFilter:"blur(16px)",
               boxShadow:isCurrent?"0 0 28px rgba(245,158,11,0.22),0 8px 24px rgba(0,0,0,0.65)":"0 4px 20px rgba(0,0,0,0.6)",
               transition:"border-color 0.3s, background 0.3s, box-shadow 0.3s",
             }}>
-            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-              <div className={`avatar${isCurrent?" active":""}`} style={{ background:AVATAR_BG[player.origIdx % AVATAR_BG.length], width:30, height:30, fontSize:"0.72rem", flexShrink:0 }}>{player.name[0]}</div>
-              <div style={{ minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap: isMobileLayout ? 4 : 6 }}>
+              <div className={`avatar${isCurrent?" active":""}`} style={{ background:AVATAR_BG[player.origIdx % AVATAR_BG.length], width: isMobileLayout ? 22 : 30, height: isMobileLayout ? 22 : 30, fontSize: isMobileLayout ? "0.58rem" : "0.72rem", flexShrink:0 }}>{player.name[0]}</div>
+              {!isMobileLayout && <div style={{ minWidth:0 }}>
                 <div style={{ fontSize:"0.68rem", fontWeight:700, color:isCurrent?"#f59e0b":"#cbd5e1", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:badgeW-60 }}>{player.name}</div>
                 <div style={{ fontSize:"0.55rem", color:isCurrent?"#d97706":"#475569" }}>{count} carte{count!==1?"s":""}</div>
-              </div>
-              {isCurrent && <div className="thinking-dots" style={{ transform:"scale(0.65)", flexShrink:0 }}><div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/></div>}
-            {isCurrent && globalTimer !== null && <TurnTimer timeLeft={globalTimer} />}
+              </div>}
+              {isMobileLayout && <span style={{ fontSize:"0.6rem", fontWeight:800, color:isCurrent?"#f59e0b":"#94a3b8" }}>{count}</span>}
+              {isCurrent && !isMobileLayout && <div className="thinking-dots" style={{ transform:"scale(0.65)", flexShrink:0 }}><div className="thinking-dot"/><div className="thinking-dot"/><div className="thinking-dot"/></div>}
+              {isCurrent && globalTimer !== null && <TurnTimer timeLeft={globalTimer} />}
             </div>
-            <div style={{ position:"relative", width:badgeW-20, height:cardH+6 }}>
+            {!isMobileLayout && <div style={{ position:"relative", width:badgeW-20, height:cardH+6 }}>
               {Array.from({ length: fanCount }).map((_, j) => {
                 const center=(fanCount-1)/2, offset=(j-center)*fanSpacing, rot=(j-center)*3, yUp=Math.abs(j-center)*0.6;
                 return <div key={j} style={{ position:"absolute", left:`calc(50% + ${offset}px - ${cardW/2}px)`, top:yUp, transform:`rotate(${rot}deg)`, transformOrigin:"bottom center", filter:isCurrent?"brightness(1.15)":"brightness(0.7)", transition:"filter 0.3s" }}><UnoCard card={{ id:`back-${j}`, color:"wild", value:"wild" }} size="mini" faceDown={true} /></div>;
               })}
-            </div>
+            </div>}
           </div>
         );
       })}
@@ -612,7 +629,7 @@ export default function ZunoMP() {
                     className={`card pile-card card-back ${mustDraw||canCounter?"draw-pile-must":isMyTurn&&gameState.pendingDrawCount===0?"draw-pile":"draw-pile-off"}`}
                     style={{ cursor:(mustDraw||canCounter||(isMyTurn&&gameState.pendingDrawCount===0))&&!acting?"pointer":"default" }}
                     onClick={() => { if ((mustDraw||canCounter||(isMyTurn&&gameState.pendingDrawCount===0))&&!acting) handleDraw(); }}>
-                    <div className="card-face"><div className="card-oval"/><span className="card-back-label">ZUNO</span></div>
+                    <img src="/zuno/back_card.png" alt="" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"inherit", display:"block" }} draggable={false} />
                   </div>
                   <span style={{ fontSize:"0.6rem", color:"#374151" }}>{gameState.deck}</span>
                 </>
@@ -649,6 +666,7 @@ export default function ZunoMP() {
       <div style={{
         position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)",
         zIndex:30, width:"min(100%, 900px)", background:"rgba(4,10,20,0.97)",
+        zoom: vscale,
         borderTop:`2px solid ${isMyTurn?"rgba(245,158,11,0.45)":"rgba(255,255,255,0.07)"}`,
         borderLeft:`2px solid ${isMyTurn?"rgba(245,158,11,0.45)":"rgba(255,255,255,0.07)"}`,
         borderRight:`2px solid ${isMyTurn?"rgba(245,158,11,0.45)":"rgba(255,255,255,0.07)"}`,

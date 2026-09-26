@@ -20,7 +20,7 @@ function CardStack({ count, active }: { count: number; active: boolean }) {
       {Array.from({ length: n }).map((_, i) => (
         <div key={i} style={{
           position: "absolute", right: i * 4, top: i * 0.8, width: 22, height: 34, borderRadius: 5,
-          background: active ? "linear-gradient(145deg,#3b5080,#1e3263)" : "linear-gradient(145deg,#243044,#161f30)",
+          backgroundImage: `url('/zuno/back_card.png')`, backgroundSize: "cover", backgroundPosition: "center",
           border: `1px solid ${active ? "rgba(245,158,11,0.35)" : "rgba(255,255,255,0.09)"}`,
           zIndex: i, transition: "border-color 0.3s",
         }} />
@@ -68,6 +68,7 @@ export default function ZunoGame() {
   const [pseudo, setPseudo] = useState("Vous");
   const [state, setState] = useState<GameState | null>(null);
   const [vscale, setVscale] = useState(1);
+  const [winSize, setWinSize] = useState({ w: 0, h: 0 });
   const [confirmQuit, setConfirmQuit] = useState(false);
   const [logKey, setLogKey] = useState(0);
   const [aiThinking, setAiThinking] = useState(false);
@@ -94,7 +95,11 @@ export default function ZunoGame() {
   const handScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const update = () => setVscale(Math.min(window.innerWidth / 1366, window.innerHeight / 768, 1));
+    const update = () => {
+      const w = window.innerWidth, h = window.innerHeight;
+      setVscale(Math.min(w / 1366, h / 768, 1));
+      setWinSize({ w, h });
+    };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
@@ -141,6 +146,7 @@ export default function ZunoGame() {
 
   function startGameWith(n: number, name = pseudo) {
     prevHandRef.current = [];
+    statRecorded.current = false;
     setAiThinking(false); setFlyHuman(null); setFlyAI(null);
     setDrawFly(null); setDrawnHiddenId(null); setDrawnFlipId(null);
     update(initGame([name, ...AI_NAMES.slice(0, n)]));
@@ -217,6 +223,14 @@ export default function ZunoGame() {
     if (state?.phase === "playing" && state.currentPlayerIndex === 0 && !confirmQuit) setTimeLeft(30);
     else setTimeLeft(null);
   }, [state?.currentPlayerIndex, state?.phase, confirmQuit]);
+
+  const statRecorded = useRef(false);
+  useEffect(() => {
+    if (state?.phase !== "won" || statRecorded.current) return;
+    statRecorded.current = true;
+    const won = state.winner === pseudo;
+    fetch("/api/stats/record", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ game: "zuno-solo", won }) }).catch(() => {});
+  }, [state?.phase, state?.winner, pseudo]);
 
   useEffect(() => {
     if (timeLeft === null) return;
@@ -334,8 +348,17 @@ export default function ZunoGame() {
     return { left: `calc(50% + ${x}px - ${aiBadgeW / 2}px)`, top: `calc(46% + ${y}px - ${aiBadgeH / 2}px)` };
   });
 
+  const isMobileDevice = winSize.w > 0 && Math.min(winSize.w, winSize.h) < 500;
+
   return (
     <div style={{ position: "fixed", inset: 0 }}>
+      {isMobileDevice && (
+        <div style={{ position:"fixed", inset:0, zIndex:99999, background:"rgba(4,10,16,0.97)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+          <p style={{ color:"rgba(255,255,255,0.7)", fontWeight:700, fontSize:"0.95rem", textAlign:"center", margin:0, lineHeight:1.5 }}>ZUNO<br/><span style={{ fontSize:"0.78rem", color:"rgba(255,255,255,0.35)", fontWeight:500 }}>disponible sur desktop uniquement</span></p>
+          <a href="/hub/zuno" style={{ marginTop:8, padding:"10px 22px", borderRadius:10, background:"rgba(245,158,11,0.1)", border:"1px solid rgba(245,158,11,0.3)", color:"#fbbf24", fontWeight:700, fontSize:"0.82rem", textDecoration:"none" }}>Retour</a>
+        </div>
+      )}
       {isHumanPickingColor && <ColorPicker onPick={(c: CardColor) => update(pickColor(state, c))} />}
       {!confirmQuit && humanMultiDraw && <FlyingCard key={humanMultiDraw.key} card={{ id: `_human_draw_${humanMultiDraw.key}`, color: "wild", value: "wild" }} fromX={humanMultiDraw.fromX} fromY={humanMultiDraw.fromY} toX={humanMultiDraw.toX} toY={humanMultiDraw.toY} faceDown={true} onDone={() => {
         const q = humanDrawQueueRef.current;
@@ -447,7 +470,7 @@ export default function ZunoGame() {
             {state.deck.length > 0
               ? <>
                   <div ref={deckRef} className={`card pile-card card-back ${mustDraw ? "draw-pile-must" : isHumanTurn && state.pendingDrawCount === 0 ? "draw-pile" : "draw-pile-off"}`} onClick={mustDraw || (isHumanTurn && state.pendingDrawCount === 0) ? handleHumanDraw : undefined}>
-                    <div className="card-face"><div className="card-oval"/><span className="card-back-label">ZUNO</span></div>
+                    <img src="/zuno/back_card.png" alt="" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"inherit", display:"block" }} draggable={false} />
                   </div>
                   <span style={{ fontSize: "0.6rem", color: "#374151" }}>{state.deck.length}</span>
                 </>
@@ -480,6 +503,7 @@ export default function ZunoGame() {
       <div style={{
         position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)",
         zIndex: 30, width: "min(100%, 900px)", background: "rgba(4,10,20,0.97)",
+        zoom: vscale,
         borderTop: `2px solid ${isHumanTurn ? "rgba(245,158,11,0.45)" : "rgba(255,255,255,0.07)"}`,
         borderLeft: `2px solid ${isHumanTurn ? "rgba(245,158,11,0.45)" : "rgba(255,255,255,0.07)"}`,
         borderRight: `2px solid ${isHumanTurn ? "rgba(245,158,11,0.45)" : "rgba(255,255,255,0.07)"}`,

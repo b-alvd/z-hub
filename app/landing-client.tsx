@@ -82,6 +82,29 @@ export default function LandingClient({ user }: Props) {
       .lnd-profile:hover { border-color: rgba(255,255,255,0.15) !important; background: rgba(255,255,255,0.04) !important; }
       .game-card-zuno { transition: transform 0.2s, border-color 0.2s; }
       .game-card-zuno:hover { transform: translateY(-4px); border-color: rgba(245,158,11,0.35) !important; }
+      .lnd-username { display: inline; }
+      .hero-section {
+        min-height: 100dvh; display: flex; align-items: center;
+        justify-content: center; padding: 80px 64px; position: relative;
+      }
+      .hero-row { display: flex; align-items: center; gap: 80px; max-width: 1000px; width: 100%; }
+      .quote-section { padding: 80px 48px; }
+      .games-section { padding: 100px 64px; }
+      .cta-section { padding: 120px 48px; }
+      .footer-inner { padding: 28px 48px; }
+      @media (max-width: 768px) {
+        .lnd-nav-pad { padding: 0 16px !important; }
+        .lnd-username { display: none !important; }
+        .hero-section { padding: 90px 20px 40px !important; min-height: unset !important; display: block !important; }
+        .hero-row { flex-direction: column !important; gap: 24px !important; align-items: flex-start !important; max-width: 100% !important; }
+        .hero-visual-wrap { display: none !important; }
+        .quote-section { padding: 40px 20px !important; }
+        .games-section { padding: 48px 20px !important; }
+        .cta-section { padding: 60px 20px !important; }
+        .footer-inner { flex-direction: column !important; gap: 16px !important; text-align: center; padding: 24px 20px !important; }
+        .footer-links { justify-content: center; }
+        .hero-h1 { font-size: 4rem !important; letter-spacing: -3px !important; }
+      }
     `}</style>
     <main style={{
       background: "#030b07", color: "#e2e8f0",
@@ -90,7 +113,7 @@ export default function LandingClient({ user }: Props) {
     }}>
 
       {/* NAV */}
-      <nav style={{
+      <nav className="lnd-nav-pad" style={{
         position: "fixed", top: 0, left: 0, right: 0, zIndex: 200,
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 40px", height: 58,
@@ -118,7 +141,7 @@ export default function LandingClient({ user }: Props) {
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                   fontSize: "0.6rem", fontWeight: 900, color: "#0a0a0a", flexShrink: 0,
                 }}>{user.username[0].toUpperCase()}</span>
-                {user.username}
+                <span className="lnd-username">{user.username}</span>
               </Link>
               <Link href="/hub" className="lnd-btn" style={{
                 padding: "7px 18px", borderRadius: 9, fontSize: "0.82rem", fontWeight: 800,
@@ -141,17 +164,15 @@ export default function LandingClient({ user }: Props) {
       </nav>
 
       {/* HERO */}
-      <section style={{
-        minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "80px 64px", position: "relative",
+      <section className="hero-section" style={{
         backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(255,255,255,0.016) 40px),
                           repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(255,255,255,0.016) 40px)`,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 80, maxWidth: 1000, width: "100%" }}>
+        <div className="hero-row">
           {/* Texte */}
           <div style={{ flex: "1 1 0" }}>
             <p style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", color: "#475569", marginBottom: 24 }}>Mini-jeux en ligne</p>
-            <h1 style={{
+            <h1 className="hero-h1" style={{
               fontSize: "clamp(4rem,9vw,8rem)", fontWeight: 900,
               letterSpacing: "-6px", lineHeight: 0.88, margin: "0 0 32px",
               background: "linear-gradient(130deg,#fbbf24 0%,#f97316 45%,#ef4444 100%)",
@@ -163,7 +184,7 @@ export default function LandingClient({ user }: Props) {
           </div>
 
           {/* Carte ZUNO */}
-          <div className="hero-visual" style={{ flex: "0 0 320px" }}>
+          <div className="hero-visual hero-visual-wrap" style={{ flex: "0 0 320px" }}>
             <div style={{
               padding: "32px 28px", borderRadius: 24,
               background: "linear-gradient(145deg, rgba(245,158,11,0.09) 0%, rgba(239,68,68,0.05) 100%)",
@@ -223,12 +244,10 @@ export default function LandingClient({ user }: Props) {
       </section>
 
       {/* CITATION */}
-      <section style={{
-        padding: "80px 48px",
-        borderTop: "1px solid rgba(255,255,255,0.04)",
+      <section className="quote-section" style={{
+        padding: "80px 48px", borderTop: "1px solid rgba(255,255,255,0.04)",
         borderBottom: "1px solid rgba(255,255,255,0.04)",
-        background: "rgba(255,255,255,0.01)",
-        textAlign: "center",
+        background: "rgba(255,255,255,0.01)", textAlign: "center",
       }}>
         <p style={{ fontSize: "clamp(1.4rem,3vw,2.2rem)", fontWeight: 800, letterSpacing: "-1px", color: "#e2e8f0", margin: 0 }}>
           Gratuit, sans pub, sans captcha à la con. Juste des jeux.
@@ -236,7 +255,7 @@ export default function LandingClient({ user }: Props) {
       </section>
 
       {/* GAMES GRID */}
-      <section style={{ padding: "100px 64px", maxWidth: 1100, margin: "0 auto" }}>
+      <section className="games-section" style={{ maxWidth: 1100, margin: "0 auto" }}>
         <p style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", color: "#374151", marginBottom: 12 }}>Catalogue</p>
         <h2 style={{ fontSize: "clamp(1.5rem,3vw,2.2rem)", fontWeight: 900, letterSpacing: "-1.5px", color: "#e2e8f0", margin: "0 0 48px" }}>Les jeux disponibles</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
@@ -292,8 +311,8 @@ export default function LandingClient({ user }: Props) {
       </section>
 
       {/* CTA */}
-      <section style={{
-        padding: "120px 48px", borderTop: "1px solid rgba(255,255,255,0.04)",
+      <section className="cta-section" style={{
+        borderTop: "1px solid rgba(255,255,255,0.04)",
         display: "flex", flexDirection: "column", alignItems: "center",
         maxWidth: 1100, margin: "0 auto",
       }}>
@@ -316,8 +335,8 @@ export default function LandingClient({ user }: Props) {
       </section>
 
       {/* FOOTER */}
-      <footer style={{
-        padding: "28px 48px", borderTop: "1px solid rgba(255,255,255,0.05)",
+      <footer className="footer-inner" style={{
+        borderTop: "1px solid rgba(255,255,255,0.05)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
         <span style={{

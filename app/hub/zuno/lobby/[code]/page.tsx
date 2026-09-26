@@ -17,6 +17,14 @@ export default function ZunoLobbyPage() {
   const [starting, setStarting] = useState(false);
   const [closing, setClosing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(Math.min(window.innerWidth, window.innerHeight) < 500);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   const fetchRoom = useCallback(async () => {
     const res = await fetch(`/api/rooms/${code}`);
@@ -89,6 +97,14 @@ export default function ZunoLobbyPage() {
   const emptyCount = EMPTY_SLOTS - filledCount;
   const myUserId = room.players[room.myPlayerIndex]?.userId;
   const canStart = room.isHost && filledCount >= 2 && !starting;
+
+  if (isMobile) return (
+    <main style={{ minHeight:"100dvh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:"radial-gradient(ellipse 80% 60% at 50% 30%, #0d1f3c 0%, #050e0a 50%, #020608 100%)", padding:"40px 20px", gap:16 }}>
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+      <p style={{ color:"rgba(255,255,255,0.7)", fontWeight:700, fontSize:"0.95rem", textAlign:"center", margin:0, lineHeight:1.5 }}>ZUNO Multijoueur<br/><span style={{ fontSize:"0.78rem", color:"rgba(255,255,255,0.35)", fontWeight:500 }}>disponible sur desktop uniquement</span></p>
+      <a href="/hub/zuno" style={{ marginTop:8, padding:"10px 22px", borderRadius:10, background:"rgba(99,102,241,0.12)", border:"1px solid rgba(99,102,241,0.3)", color:"#a5b4fc", fontWeight:700, fontSize:"0.82rem", textDecoration:"none" }}>Retour</a>
+    </main>
+  );
 
   return (
     <main style={{

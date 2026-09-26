@@ -70,5 +70,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cod
     args: [serializeState(state), newStatus, now, code],
   });
 
+  // Record stats for all human players when game ends
+  if (state.phase === "won") {
+    const statInserts = players
+      .filter(p => !state.players[p.playerIndex]?.left)
+      .map(p => ({
+        sql: "INSERT INTO game_stats (id, user_id, username, game, won, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        args: [crypto.randomUUID(), p.userId, p.username, "zuno", state.winner === state.players[p.playerIndex]?.name ? 1 : 0, now],
+      }));
+    for (const s of statInserts) await db.execute(s);
+  }
+
   return NextResponse.json({ gameState: sanitizeState(state, me.playerIndex) });
 }

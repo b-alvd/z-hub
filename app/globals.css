@@ -36,8 +36,9 @@ body {
   background: conic-gradient(#ff5252 0deg 90deg,#66bb6a 90deg 180deg,#42a5f5 180deg 270deg,#fff176 270deg 360deg);
 }
 .card-back {
-  background: linear-gradient(145deg,#1a3a5c,#071525);
-  border-color: rgba(255,255,255,0.1);
+  background: none;
+  border: none;
+  padding: 0;
 }
 
 /* sizes */
